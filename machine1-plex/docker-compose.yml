@@ -1,5 +1,5 @@
 # =============================================================================
-# Machine 1: Plex Server (i5-8500 / 32GB)
+# Machine 1: Spyglass — Plex Server
 # =============================================================================
 # Quick Sync iGPU transcoding, library optimization, aesthetics, monitoring.
 # Init script: ../scripts/init-machine1-plex.sh
@@ -13,8 +13,8 @@ services:
 
   tailscale:
     image: tailscale/tailscale:latest
-    container_name: tailscale
-    hostname: plex-server
+    container_name: tailscale-spyglass
+    hostname: spyglass
     restart: unless-stopped
     cap_add: [NET_ADMIN, NET_RAW]
     volumes:
@@ -67,7 +67,7 @@ services:
       - internalNode=true
       - inContainer=true
       - ffmpegVersion=7
-      - nodeName=plex-server
+      - nodeName=spyglass
     ports:
       - "8265:8265"
       - "8266:8266"
@@ -130,7 +130,7 @@ services:
 
   homepage:
     image: ghcr.io/gethomepage/homepage:latest
-    container_name: homepage
+    container_name: homepage-spyglass
     restart: unless-stopped
     environment:
       - PUID=${PUID}
@@ -144,7 +144,7 @@ services:
 
   watchtower:
     image: containrrr/watchtower:latest
-    container_name: watchtower
+    container_name: watchtower-spyglass
     restart: unless-stopped
     environment:
       - TZ=${TZ}

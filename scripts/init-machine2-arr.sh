@@ -63,6 +63,14 @@ NAS_DOWNLOADS_EXPORT="${NAS_DOWNLOADS_EXPORT:-/volume1/downloads}"
 header "Phase 1: System Packages"
 # ===========================================================================
 
+# Set machine hostname (idempotent)
+if [ "$(hostname | tr '[:upper:]' '[:lower:]')" != "privateer" ]; then
+    hostnamectl set-hostname privateer 2>/dev/null || true
+    log "Hostname set to privateer"
+else
+    log "Hostname already set to privateer"
+fi
+
 info "Updating system..."
 apt-get update -qq && apt-get upgrade -y -qq
 
@@ -189,16 +197,16 @@ RECYCLARR_CONF="$APPDATA/recyclarr/config/recyclarr.yml"
 if [ ! -f "$RECYCLARR_CONF" ]; then
     info "Deploying Recyclarr config..."
     cp "$PROJECT_DIR/config-templates/recyclarr.yml" "$RECYCLARR_CONF"
-    # Substitute API keys from .env
-    if [ -n "${SONARR_API_KEY:-}" ]; then
-        sed -i "s/YOUR_SONARR_API_KEY/${SONARR_API_KEY}/g" "$RECYCLARR_CONF"
-    fi
-    if [ -n "${RADARR_API_KEY:-}" ]; then
-        sed -i "s/YOUR_RADARR_API_KEY/${RADARR_API_KEY}/g" "$RECYCLARR_CONF"
-    fi
     log "Recyclarr config deployed"
 else
-    log "Recyclarr config already exists — skipping"
+    log "Recyclarr config already exists"
+fi
+
+# Always substitute API keys (idempotent — no-op if placeholders already replaced)
+if [ -f "$RECYCLARR_CONF" ]; then
+    [ -n "${SONARR_API_KEY:-}" ] && sed -i "s/YOUR_SONARR_API_KEY/${SONARR_API_KEY}/g" "$RECYCLARR_CONF"
+    [ -n "${RADARR_API_KEY:-}" ] && sed -i "s/YOUR_RADARR_API_KEY/${RADARR_API_KEY}/g" "$RECYCLARR_CONF"
+    log "Recyclarr credentials substituted"
 fi
 
 # Set final ownership
@@ -215,9 +223,9 @@ cd "$PROJECT_DIR"
 
 # Run as real user if possible
 if [ "$REAL_USER" != "root" ] && id -nG "$REAL_USER" | grep -qw docker; then
-    sudo -u "$REAL_USER" docker compose up -d
+    sudo -u "$REAL_USER" docker compose up -d --remove-orphans
 else
-    docker compose up -d
+    docker compose up -d --remove-orphans
 fi
 
 log "All containers starting"
@@ -255,107 +263,109 @@ get_arr_api_key() {
     return 1
 }
 
-# Wait for config files to be generated
+# Always read live keys and compare to .env (detects changed keys on re-run)
 NEED_ENV_UPDATE=false
+ENV_FILE="$PROJECT_DIR/.env"
 
-if [ -z "${RADARR_API_KEY:-}" ]; then
-    RADARR_API_KEY=$(get_arr_api_key "Radarr" "$APPDATA/radarr/config/config.xml")
-    if [ -n "$RADARR_API_KEY" ]; then
-        log "Radarr API key: $RADARR_API_KEY"
-        NEED_ENV_UPDATE=true
-    else
-        warn "Could not get Radarr API key — container may still be starting"
-    fi
-fi
-
-if [ -z "${SONARR_API_KEY:-}" ]; then
-    SONARR_API_KEY=$(get_arr_api_key "Sonarr" "$APPDATA/sonarr/config/config.xml")
-    if [ -n "$SONARR_API_KEY" ]; then
-        log "Sonarr API key: $SONARR_API_KEY"
-        NEED_ENV_UPDATE=true
-    else
-        warn "Could not get Sonarr API key — container may still be starting"
-    fi
-fi
-
-if [ -z "${LIDARR_API_KEY:-}" ]; then
-    LIDARR_API_KEY=$(get_arr_api_key "Lidarr" "$APPDATA/lidarr/config/config.xml")
-    if [ -n "$LIDARR_API_KEY" ]; then
-        log "Lidarr API key: $LIDARR_API_KEY"
-        NEED_ENV_UPDATE=true
-    else
-        warn "Could not get Lidarr API key"
-    fi
-fi
-
-if [ -z "${PROWLARR_API_KEY:-}" ]; then
-    PROWLARR_API_KEY=$(get_arr_api_key "Prowlarr" "$APPDATA/prowlarr/config/config.xml")
-    if [ -n "$PROWLARR_API_KEY" ]; then
-        log "Prowlarr API key: $PROWLARR_API_KEY"
-        NEED_ENV_UPDATE=true
-    else
-        warn "Could not get Prowlarr API key"
-    fi
-fi
-
-if [ -z "${BAZARR_API_KEY:-}" ]; then
-    # Bazarr stores its key differently
-    BAZARR_CONF_DB="$APPDATA/bazarr/config/config/config.yaml"
-    if [ -f "$BAZARR_CONF_DB" ]; then
-        BAZARR_API_KEY=$(grep -oP 'apikey:\s*\K\S+' "$BAZARR_CONF_DB" 2>/dev/null || echo "")
-        if [ -n "$BAZARR_API_KEY" ]; then
-            log "Bazarr API key: $BAZARR_API_KEY"
-            NEED_ENV_UPDATE=true
+update_env_key() {
+    local key="$1" value="$2" force="${3:-}"
+    if [ -n "$value" ]; then
+        if grep -q "^${key}=" "$ENV_FILE"; then
+            if [ "$force" = "--force" ]; then
+                sed -i "s|^${key}=.*$|${key}=${value}|" "$ENV_FILE"
+            else
+                # Only update if currently empty or placeholder
+                sed -i "s/^${key}=$/&${value}/" "$ENV_FILE"
+                sed -i "s/^${key}=YOUR_.*$/${key}=${value}/" "$ENV_FILE"
+            fi
+        else
+            echo "${key}=${value}" >> "$ENV_FILE"
         fi
     fi
+}
+
+# --- Radarr ---
+LIVE_KEY=$(get_arr_api_key "Radarr" "$APPDATA/radarr/config/config.xml")
+if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${RADARR_API_KEY:-}" ]; then
+    RADARR_API_KEY="$LIVE_KEY"
+    log "Radarr API key: $RADARR_API_KEY"
+    NEED_ENV_UPDATE=true
+elif [ -z "${RADARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
+    warn "Could not get Radarr API key — container may still be starting"
 fi
 
-if [ -z "${READARR_API_KEY:-}" ]; then
-    READARR_API_KEY=$(get_arr_api_key "Readarr" "$APPDATA/readarr/config/config.xml")
-    if [ -n "$READARR_API_KEY" ]; then
-        log "Readarr API key: $READARR_API_KEY"
+# --- Sonarr ---
+LIVE_KEY=$(get_arr_api_key "Sonarr" "$APPDATA/sonarr/config/config.xml")
+if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${SONARR_API_KEY:-}" ]; then
+    SONARR_API_KEY="$LIVE_KEY"
+    log "Sonarr API key: $SONARR_API_KEY"
+    NEED_ENV_UPDATE=true
+elif [ -z "${SONARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
+    warn "Could not get Sonarr API key — container may still be starting"
+fi
+
+# --- Lidarr ---
+LIVE_KEY=$(get_arr_api_key "Lidarr" "$APPDATA/lidarr/config/config.xml")
+if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${LIDARR_API_KEY:-}" ]; then
+    LIDARR_API_KEY="$LIVE_KEY"
+    log "Lidarr API key: $LIDARR_API_KEY"
+    NEED_ENV_UPDATE=true
+elif [ -z "${LIDARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
+    warn "Could not get Lidarr API key"
+fi
+
+# --- Prowlarr ---
+LIVE_KEY=$(get_arr_api_key "Prowlarr" "$APPDATA/prowlarr/config/config.xml")
+if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${PROWLARR_API_KEY:-}" ]; then
+    PROWLARR_API_KEY="$LIVE_KEY"
+    log "Prowlarr API key: $PROWLARR_API_KEY"
+    NEED_ENV_UPDATE=true
+elif [ -z "${PROWLARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
+    warn "Could not get Prowlarr API key"
+fi
+
+# --- Bazarr (stores key differently) ---
+BAZARR_CONF_DB="$APPDATA/bazarr/config/config/config.yaml"
+if [ -f "$BAZARR_CONF_DB" ]; then
+    LIVE_KEY=$(grep -oP 'apikey:\s*\K\S+' "$BAZARR_CONF_DB" 2>/dev/null || echo "")
+    if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${BAZARR_API_KEY:-}" ]; then
+        BAZARR_API_KEY="$LIVE_KEY"
+        log "Bazarr API key: $BAZARR_API_KEY"
         NEED_ENV_UPDATE=true
-    else
-        warn "Could not get Readarr API key"
     fi
 fi
 
-if [ -z "${WHISPARR_API_KEY:-}" ]; then
-    WHISPARR_API_KEY=$(get_arr_api_key "Whisparr" "$APPDATA/whisparr/config/config.xml")
-    if [ -n "$WHISPARR_API_KEY" ]; then
-        log "Whisparr API key: $WHISPARR_API_KEY"
-        NEED_ENV_UPDATE=true
-    else
-        warn "Could not get Whisparr API key"
-    fi
+# --- Readarr ---
+LIVE_KEY=$(get_arr_api_key "Readarr" "$APPDATA/readarr/config/config.xml")
+if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${READARR_API_KEY:-}" ]; then
+    READARR_API_KEY="$LIVE_KEY"
+    log "Readarr API key: $READARR_API_KEY"
+    NEED_ENV_UPDATE=true
+elif [ -z "${READARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
+    warn "Could not get Readarr API key"
 fi
 
-# Auto-update .env with discovered keys
+# --- Whisparr ---
+LIVE_KEY=$(get_arr_api_key "Whisparr" "$APPDATA/whisparr/config/config.xml")
+if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${WHISPARR_API_KEY:-}" ]; then
+    WHISPARR_API_KEY="$LIVE_KEY"
+    log "Whisparr API key: $WHISPARR_API_KEY"
+    NEED_ENV_UPDATE=true
+elif [ -z "${WHISPARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
+    warn "Could not get Whisparr API key"
+fi
+
+# Auto-update .env with discovered keys (--force to handle changed keys)
 if [ "$NEED_ENV_UPDATE" = true ]; then
     info "Updating .env with discovered API keys..."
-    ENV_FILE="$PROJECT_DIR/.env"
 
-    update_env_key() {
-        local key="$1" value="$2"
-        if [ -n "$value" ]; then
-            if grep -q "^${key}=" "$ENV_FILE"; then
-                # Only update if currently empty
-                sed -i "s/^${key}=$/&${value}/" "$ENV_FILE"
-                # Also update if placeholder
-                sed -i "s/^${key}=YOUR_.*$/${key}=${value}/" "$ENV_FILE"
-            else
-                echo "${key}=${value}" >> "$ENV_FILE"
-            fi
-        fi
-    }
-
-    update_env_key "RADARR_API_KEY" "$RADARR_API_KEY"
-    update_env_key "SONARR_API_KEY" "$SONARR_API_KEY"
-    update_env_key "LIDARR_API_KEY" "$LIDARR_API_KEY"
-    update_env_key "PROWLARR_API_KEY" "$PROWLARR_API_KEY"
-    update_env_key "BAZARR_API_KEY" "${BAZARR_API_KEY:-}"
-    update_env_key "READARR_API_KEY" "${READARR_API_KEY:-}"
-    update_env_key "WHISPARR_API_KEY" "${WHISPARR_API_KEY:-}"
+    update_env_key "RADARR_API_KEY" "$RADARR_API_KEY" --force
+    update_env_key "SONARR_API_KEY" "$SONARR_API_KEY" --force
+    update_env_key "LIDARR_API_KEY" "$LIDARR_API_KEY" --force
+    update_env_key "PROWLARR_API_KEY" "$PROWLARR_API_KEY" --force
+    update_env_key "BAZARR_API_KEY" "${BAZARR_API_KEY:-}" --force
+    update_env_key "READARR_API_KEY" "${READARR_API_KEY:-}" --force
+    update_env_key "WHISPARR_API_KEY" "${WHISPARR_API_KEY:-}" --force
 
     # Also update Recyclarr config with real keys
     if [ -f "$RECYCLARR_CONF" ]; then
@@ -631,21 +641,22 @@ set -a; source "$PROJECT_DIR/.env"; set +a
 QBIT_PASS="${QBIT_PASSWORD:-adminadmin}"
 if [ "$QBIT_PASS" != "adminadmin" ]; then
     info "Setting qBittorrent password..."
+    # Try custom password first (most likely on re-run)
     QBIT_COOKIE=$(curl -sf -c - -X POST "http://localhost:8080/api/v2/auth/login" \
-        -d "username=admin&password=adminadmin" 2>/dev/null | grep -oP 'SID\s+\K\S+' || echo "")
+        -d "username=admin&password=${QBIT_PASS}" 2>/dev/null | grep -oP 'SID\s+\K\S+' || echo "")
 
     if [ -n "$QBIT_COOKIE" ]; then
-        curl -sf -X POST "http://localhost:8080/api/v2/app/setPreferences" \
-            -b "SID=$QBIT_COOKIE" \
-            -d "json={\"web_ui_password\":\"${QBIT_PASS}\"}" 2>/dev/null && \
-            log "qBittorrent: password changed (user: admin)" || \
-            warn "qBittorrent: could not change password"
+        log "qBittorrent: password already set"
     else
-        # Maybe password was already changed on a previous run
+        # Fall back to default password (first run)
         QBIT_COOKIE=$(curl -sf -c - -X POST "http://localhost:8080/api/v2/auth/login" \
-            -d "username=admin&password=${QBIT_PASS}" 2>/dev/null | grep -oP 'SID\s+\K\S+' || echo "")
+            -d "username=admin&password=adminadmin" 2>/dev/null | grep -oP 'SID\s+\K\S+' || echo "")
         if [ -n "$QBIT_COOKIE" ]; then
-            log "qBittorrent: password already set"
+            curl -sf -X POST "http://localhost:8080/api/v2/app/setPreferences" \
+                -b "SID=$QBIT_COOKIE" \
+                -d "json={\"web_ui_password\":\"${QBIT_PASS}\"}" 2>/dev/null && \
+                log "qBittorrent: password changed (user: admin)" || \
+                warn "qBittorrent: could not change password"
         else
             warn "qBittorrent: could not log in (container may still be starting)"
         fi
@@ -799,7 +810,7 @@ header "Phase 9: Summary"
 # ===========================================================================
 
 echo ""
-log "Machine 2 (*arr stack) deployment complete!"
+log "Privateer (*arr stack) deployment complete!"
 echo ""
 echo "  ┌─────────────────────────────────────────────────────┐"
 echo "  │  AUTOMATED                                          │"

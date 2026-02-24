@@ -1,5 +1,5 @@
 # =============================================================================
-# Machine 2: *arr Stack (Xeon E-2334 / 128GB)
+# Machine 2: Privateer — *arr Stack
 # =============================================================================
 # Download traffic through NordVPN/Gluetun. Everything else unmasked.
 # Init script: ../scripts/init-machine2-arr.sh
@@ -14,8 +14,8 @@ services:
   # ── Remote Access ──────────────────────────────────────────────────────────
   tailscale:
     image: tailscale/tailscale:latest
-    container_name: tailscale
-    hostname: arr-server
+    container_name: tailscale-privateer
+    hostname: privateer
     restart: unless-stopped
     cap_add: [NET_ADMIN, NET_RAW]
     volumes:
@@ -290,12 +290,12 @@ services:
 
   homepage:
     image: ghcr.io/gethomepage/homepage:latest
-    container_name: homepage
+    container_name: homepage-privateer
     restart: unless-stopped
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
-    ports: ["3100:3000"]
+    ports: ["3101:3000"]
     volumes:
       - ${APPDATA}/homepage/config:/app/config
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -304,7 +304,7 @@ services:
   # ── Maintenance ────────────────────────────────────────────────────────────
   watchtower:
     image: containrrr/watchtower:latest
-    container_name: watchtower
+    container_name: watchtower-privateer
     restart: unless-stopped
     environment:
       - TZ=${TZ}

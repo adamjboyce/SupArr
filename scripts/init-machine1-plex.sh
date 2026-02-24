@@ -56,6 +56,14 @@ REAL_USER="${SUDO_USER:-$USER}"
 header "Phase 1: System Packages + Intel iGPU Drivers"
 # ===========================================================================
 
+# Set machine hostname (idempotent)
+if [ "$(hostname | tr '[:upper:]' '[:lower:]')" != "spyglass" ]; then
+    hostnamectl set-hostname spyglass 2>/dev/null || true
+    log "Hostname set to spyglass"
+else
+    log "Hostname already set to spyglass"
+fi
+
 info "Updating system..."
 apt-get update -qq && apt-get upgrade -y -qq
 
@@ -154,8 +162,13 @@ KOMETA_CONF="$APPDATA/kometa/config/config.yml"
 if [ ! -f "$KOMETA_CONF" ]; then
     info "Deploying Kometa config template..."
     cp "$PROJECT_DIR/config-templates/kometa.yml" "$KOMETA_CONF"
+    log "Kometa config deployed"
+else
+    log "Kometa config already exists"
+fi
 
-    # Substitute known values
+# Always substitute known values (idempotent — no-op if placeholders already replaced)
+if [ -f "$KOMETA_CONF" ]; then
     PLEX_IP="${PLEX_IP:-localhost}"
     [ -n "${PLEX_TOKEN:-}" ] && sed -i "s/YOUR_PLEX_TOKEN/${PLEX_TOKEN}/g" "$KOMETA_CONF"
     [ -n "${TMDB_API_KEY:-}" ] && sed -i "s/YOUR_TMDB_API_KEY/${TMDB_API_KEY}/g" "$KOMETA_CONF"
@@ -163,10 +176,7 @@ if [ ! -f "$KOMETA_CONF" ]; then
     [ -n "${TRAKT_CLIENT_ID:-}" ] && sed -i "s/YOUR_TRAKT_ID/${TRAKT_CLIENT_ID}/g" "$KOMETA_CONF"
     [ -n "${TRAKT_CLIENT_SECRET:-}" ] && sed -i "s/YOUR_TRAKT_SECRET/${TRAKT_CLIENT_SECRET}/g" "$KOMETA_CONF"
     sed -i "s|http://PLEX_SERVER_IP:32400|http://${PLEX_IP}:32400|g" "$KOMETA_CONF"
-
-    log "Kometa config deployed (edit $KOMETA_CONF for any remaining placeholders)"
-else
-    log "Kometa config already exists"
+    log "Kometa credentials substituted"
 fi
 
 # --- Homepage config skeleton ---
@@ -188,9 +198,9 @@ info "Starting Plex stack..."
 cd "$PROJECT_DIR"
 
 if [ "$REAL_USER" != "root" ] && id -nG "$REAL_USER" | grep -qw docker; then
-    sudo -u "$REAL_USER" docker compose up -d
+    sudo -u "$REAL_USER" docker compose up -d --remove-orphans
 else
-    docker compose up -d
+    docker compose up -d --remove-orphans
 fi
 
 log "All containers starting"
@@ -259,7 +269,7 @@ header "Phase 8: Summary"
 # ===========================================================================
 
 echo ""
-log "Machine 1 (Plex server) deployment complete!"
+log "Spyglass (Plex server) deployment complete!"
 echo ""
 echo "  ┌─────────────────────────────────────────────────────┐"
 echo "  │  AUTOMATED                                          │"
@@ -297,8 +307,8 @@ echo "    → Schedule: 1 AM – 5 PM (avoid prime viewing)"
 echo ""
 echo "  Overseerr  (http://localhost:5055)"
 echo "    → Sign in with Plex"
-echo "    → Connect Radarr: http://ARR_MACHINE_IP:7878"
-echo "    → Connect Sonarr: http://ARR_MACHINE_IP:8989"
+echo "    → Connect Radarr: http://PRIVATEER_IP:7878 (or localhost if single-machine)"
+echo "    → Connect Sonarr: http://PRIVATEER_IP:8989 (or localhost if single-machine)"
 echo ""
 echo "  Tautulli  (http://localhost:8181)"
 echo "    → Auto-detects Plex on same machine"

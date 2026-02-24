@@ -25,6 +25,15 @@ err()    { echo -e "${RED}[✗]${NC} $1"; }
 info()   { echo -e "${CYAN}[→]${NC} $1"; }
 header() { echo -e "\n${BOLD}══════════════════════════════════════════════════${NC}"; echo -e "${BOLD}  $1${NC}"; echo -e "${BOLD}══════════════════════════════════════════════════${NC}\n"; }
 
+validate_ip() {
+    local ip="$1"
+    [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || return 1
+    local IFS='.'; read -ra octets <<< "$ip"
+    for octet in "${octets[@]}"; do (( octet <= 255 )) || return 1; done
+}
+
+validate_path() { [[ "$1" =~ ^/ ]]; }
+
 # Prompt with default value
 ask() {
     local var_name="$1" prompt="$2" default="${3:-}" secret="${4:-}"
@@ -53,7 +62,7 @@ ask() {
     fi
 
     value="${value:-$default}"
-    eval "$var_name=\"$value\""
+    printf -v "$var_name" "%s" "$value"
 }
 
 ask_yn() {
@@ -74,8 +83,22 @@ SSH_KEY="$HOME/.ssh/suparr_deploy_key"
 header "SupArr — Remote Deploy"
 # ===========================================================================
 
-echo -e "  ${BOLD}Deploy both machines from your desktop.${NC}"
+echo -e "  ${BOLD}Deploy from your desktop via SSH.${NC}"
 echo -e "  ${DIM}All prompts happen here. No interactive SSH sessions.${NC}\n"
+
+echo -e "  ${BOLD}Deploy mode?${NC}"
+echo -e "    ${BOLD}1)${NC} Two Machines — Spyglass (Plex) + Privateer (*arr)"
+echo -e "    ${BOLD}2)${NC} Single Machine — everything on one box"
+echo ""
+echo -en "${CYAN}  Choose [1/2] [1]: ${NC}"
+read -r DEPLOY_MODE
+DEPLOY_MODE="${DEPLOY_MODE:-1}"
+
+case "$DEPLOY_MODE" in
+    1) SINGLE_MACHINE=false ;;
+    2) SINGLE_MACHINE=true ;;
+    *) err "Invalid choice."; exit 1 ;;
+esac
 
 # ===========================================================================
 header "Phase 0: Prerequisites"
@@ -104,18 +127,40 @@ log "All prerequisites found"
 header "Phase 1: Target Machines"
 # ===========================================================================
 
-echo -e "  ${DIM}Enter the IPs and SSH credentials for both machines.${NC}"
-echo -e "  ${DIM}Same SSH user/password for both? Just enter once.${NC}\n"
+if [ "$SINGLE_MACHINE" = true ]; then
+    echo -e "  ${DIM}Enter the IP and SSH credentials for your machine.${NC}\n"
 
-ask PLEX_IP_ADDR "Plex machine IP" ""
-ask ARR_IP_ADDR "*arr machine IP" ""
+    ask PLEX_IP_ADDR "Target machine IP" ""
+    [ -z "$PLEX_IP_ADDR" ] && { err "Machine IP is required"; exit 1; }
+    validate_ip "$PLEX_IP_ADDR" || { err "Invalid IP: $PLEX_IP_ADDR"; exit 1; }
+    ARR_IP_ADDR="$PLEX_IP_ADDR"
+else
+    echo -e "  ${DIM}Enter the IPs and SSH credentials for both machines.${NC}"
+    echo -e "  ${DIM}Same SSH user/password for both? Just enter once.${NC}\n"
+
+    ask PLEX_IP_ADDR "Spyglass (Plex) machine IP" ""
+    [ -z "$PLEX_IP_ADDR" ] && { err "Spyglass IP is required"; exit 1; }
+    validate_ip "$PLEX_IP_ADDR" || { err "Invalid Spyglass IP: $PLEX_IP_ADDR"; exit 1; }
+
+    ask ARR_IP_ADDR "Privateer (*arr) machine IP" ""
+    [ -z "$ARR_IP_ADDR" ] && { err "Privateer IP is required"; exit 1; }
+    validate_ip "$ARR_IP_ADDR" || { err "Invalid Privateer IP: $ARR_IP_ADDR"; exit 1; }
+fi
+
 ask NAS_IP "NAS IP (for NFS mounts, or blank to skip)" ""
+if [ -n "$NAS_IP" ] && ! validate_ip "$NAS_IP"; then
+    err "Invalid NAS IP: $NAS_IP"; exit 1
+fi
 
 echo ""
-ask SSH_USER "SSH username (same for both machines)" "root"
+ask SSH_USER "SSH username" "root"
 ask SSH_PASS "SSH password" "" "secret"
 
-log "Targets: Plex=${PLEX_IP_ADDR}  Arr=${ARR_IP_ADDR}"
+if [ "$SINGLE_MACHINE" = true ]; then
+    log "Target: ${PLEX_IP_ADDR} (single machine)"
+else
+    log "Targets: Spyglass=${PLEX_IP_ADDR}  Privateer=${ARR_IP_ADDR}"
+fi
 
 # ===========================================================================
 header "Phase 2: Configuration"
@@ -147,10 +192,12 @@ ask TAILSCALE_AUTH_KEY "Tailscale auth key (or 'skip')" "skip"
 
 # ── Plex-specific ──
 echo ""
-echo -e "  ${BOLD}Plex machine settings:${NC}\n"
+echo -e "  ${BOLD}Spyglass (Plex) settings:${NC}\n"
 
-ask PLEX_MEDIA_ROOT "Plex media mount point" "/mnt/media"
-ask PLEX_APPDATA "Plex app data directory" "/opt/media-stack"
+ask PLEX_MEDIA_ROOT "Spyglass media mount point" "/mnt/media"
+validate_path "$PLEX_MEDIA_ROOT" || { err "Spyglass media root must be an absolute path"; exit 1; }
+ask PLEX_APPDATA "Spyglass app data directory" "/opt/media-stack"
+validate_path "$PLEX_APPDATA" || { err "Spyglass app data must be an absolute path"; exit 1; }
 
 echo -e "\n  ${DIM}Get a claim token at: https://plex.tv/claim (valid ~4 minutes)${NC}\n"
 ask PLEX_CLAIM_TOKEN "Plex claim token (or 'skip')" "skip"
@@ -178,11 +225,14 @@ ask TRAKT_CLIENT_SECRET "Trakt client secret" "skip"
 
 # ── Arr-specific ──
 echo ""
-echo -e "  ${BOLD}*arr machine settings:${NC}\n"
+echo -e "  ${BOLD}Privateer (*arr) settings:${NC}\n"
 
-ask ARR_MEDIA_ROOT "*arr media mount point" "/mnt/media"
-ask ARR_DOWNLOADS_ROOT "*arr download scratch directory" "/mnt/downloads"
-ask ARR_APPDATA "*arr app data directory" "/opt/arr-stack"
+ask ARR_MEDIA_ROOT "Privateer media mount point" "/mnt/media"
+validate_path "$ARR_MEDIA_ROOT" || { err "Privateer media root must be an absolute path"; exit 1; }
+ask ARR_DOWNLOADS_ROOT "Privateer download scratch directory" "/mnt/downloads"
+validate_path "$ARR_DOWNLOADS_ROOT" || { err "Privateer downloads root must be an absolute path"; exit 1; }
+ask ARR_APPDATA "Privateer app data directory" "/opt/arr-stack"
+validate_path "$ARR_APPDATA" || { err "Privateer app data must be an absolute path"; exit 1; }
 
 echo ""
 echo -e "  ${BOLD}NordVPN (all downloads tunnel through this):${NC}\n"
@@ -248,22 +298,29 @@ push_key() {
         warn "Could not push key to ${label} — will use password fallback"
 }
 
-push_key "$PLEX_IP_ADDR" "Plex"
-push_key "$ARR_IP_ADDR" "Arr"
+push_key "$PLEX_IP_ADDR" "Spyglass"
+if [ "$SINGLE_MACHINE" = false ]; then
+    push_key "$ARR_IP_ADDR" "Privateer"
+fi
 
 # From now on, use key auth
 SSH_CMD="ssh $SSH_OPTS -i $SSH_KEY"
 RSYNC_SSH="ssh $SSH_OPTS -i $SSH_KEY"
 
 # Test connectivity
-for target in "$PLEX_IP_ADDR" "$ARR_IP_ADDR"; do
-    label="Plex"
-    [ "$target" = "$ARR_IP_ADDR" ] && label="Arr"
+TARGETS=("$PLEX_IP_ADDR")
+TARGET_LABELS=("Spyglass")
+if [ "$SINGLE_MACHINE" = false ]; then
+    TARGETS+=("$ARR_IP_ADDR")
+    TARGET_LABELS+=("Privateer")
+fi
+
+for i in "${!TARGETS[@]}"; do
     # shellcheck disable=SC2086
-    if $SSH_CMD "${SSH_USER}@${target}" "echo ok" &>/dev/null; then
-        log "SSH connection verified: ${label}"
+    if $SSH_CMD "${SSH_USER}@${TARGETS[$i]}" "echo ok" &>/dev/null; then
+        log "SSH connection verified: ${TARGET_LABELS[$i]}"
     else
-        err "Cannot connect to ${label} (${target}) — check credentials and try again"
+        err "Cannot connect to ${TARGET_LABELS[$i]} (${TARGETS[$i]}) — check credentials and try again"
         exit 1
     fi
 done
@@ -278,7 +335,7 @@ trap 'rm -f "$PLEX_ENV_FILE" "$ARR_ENV_FILE"' EXIT
 
 cat > "$PLEX_ENV_FILE" <<ENVEOF
 # =============================================================================
-# Machine 1: Plex Server — Generated by SupArr remote-deploy.sh
+# Spyglass (Plex Server) — Generated by SupArr remote-deploy.sh
 # =============================================================================
 PUID=${PUID}
 PGID=${PGID}
@@ -301,7 +358,7 @@ ENVEOF
 
 cat > "$ARR_ENV_FILE" <<ENVEOF
 # =============================================================================
-# Machine 2: *arr Stack — Generated by SupArr remote-deploy.sh
+# Privateer (*arr Stack) — Generated by SupArr remote-deploy.sh
 # =============================================================================
 PUID=${PUID}
 PGID=${PGID}
@@ -333,15 +390,15 @@ NOTIFIARR_API_KEY=${NOTIFIARR_API_KEY}
 WATCHTOWER_NOTIFICATION_URL=${ARR_WATCHTOWER_URL}
 ENVEOF
 
-log "Plex .env generated"
-log "Arr .env generated"
+log "Spyglass .env generated"
+log "Privateer .env generated"
 
 # ===========================================================================
 header "Phase 5: Sync Project Files"
 # ===========================================================================
 
 sync_to_target() {
-    local host="$1" label="$2" env_file="$3"
+    local host="$1" label="$2"
     info "Syncing project files to ${label} (${host}:${REMOTE_PROJECT_PATH})..."
 
     # Create remote directory
@@ -356,12 +413,9 @@ sync_to_target() {
         --exclude '.git' \
         "$SCRIPT_DIR/" "${SSH_USER}@${host}:${REMOTE_PROJECT_PATH}/"
 
-    # Copy the machine-specific .env
-    if [ "$label" = "Plex" ]; then
-        rsync -az -e "$RSYNC_SSH" "$env_file" "${SSH_USER}@${host}:${REMOTE_PROJECT_PATH}/machine1-plex/.env"
-    else
-        rsync -az -e "$RSYNC_SSH" "$env_file" "${SSH_USER}@${host}:${REMOTE_PROJECT_PATH}/machine2-arr/.env"
-    fi
+    # Copy both .env files
+    rsync -az -e "$RSYNC_SSH" "$PLEX_ENV_FILE" "${SSH_USER}@${host}:${REMOTE_PROJECT_PATH}/machine1-plex/.env"
+    rsync -az -e "$RSYNC_SSH" "$ARR_ENV_FILE" "${SSH_USER}@${host}:${REMOTE_PROJECT_PATH}/machine2-arr/.env"
 
     # Set permissions
     # shellcheck disable=SC2086
@@ -370,11 +424,15 @@ sync_to_target() {
     log "${label}: files synced"
 }
 
-sync_to_target "$PLEX_IP_ADDR" "Plex" "$PLEX_ENV_FILE"
-sync_to_target "$ARR_IP_ADDR" "Arr" "$ARR_ENV_FILE"
+if [ "$SINGLE_MACHINE" = true ]; then
+    sync_to_target "$PLEX_IP_ADDR" "Target"
+else
+    sync_to_target "$PLEX_IP_ADDR" "Spyglass"
+    sync_to_target "$ARR_IP_ADDR" "Privateer"
+fi
 
 # ===========================================================================
-header "Phase 6: Deploy (Parallel)"
+header "Phase 6: Deploy"
 # ===========================================================================
 
 # Test if we can sudo without password, or if we're root
@@ -402,90 +460,262 @@ run_init() {
     $SSH_CMD "${SSH_USER}@${host}" "${sudo_prefix} bash ${REMOTE_PROJECT_PATH}/scripts/${script}" 2>&1
 }
 
+# ── Overseerr readiness check (remote, quiet) ─────────────────────────────────
+check_overseerr_ready_remote() {
+    local plex_host="$1" plex_appdata="$2"
+    local os_key
+    # shellcheck disable=SC2086
+    os_key=$($SSH_CMD "${SSH_USER}@${plex_host}" \
+        "jq -r '.main.apiKey // empty' '${plex_appdata}/overseerr/config/settings.json' 2>/dev/null" || echo "")
+    [ -z "$os_key" ] && return 1
+    curl -sf -o /dev/null "http://${plex_host}:5055/api/v1/settings/public" 2>/dev/null || return 1
+    local initialized
+    initialized=$(curl -sf "http://${plex_host}:5055/api/v1/settings/public" 2>/dev/null | jq -r '.initialized // false' 2>/dev/null || echo "false")
+    [ "$initialized" = "true" ]
+}
+
+# ── Plex library check (remote, quiet) ─────────────────────────────────────────
+check_plex_has_libraries_remote() {
+    local plex_host="$1" plex_token="${2:-}"
+    local url="http://${plex_host}:32400/library/sections"
+    [ -n "$plex_token" ] && url="${url}?X-Plex-Token=${plex_token}"
+    local count
+    count=$(curl -sf -H "Accept: application/json" "$url" 2>/dev/null | jq '.MediaContainer.size // 0' 2>/dev/null || echo "0")
+    [ "${count:-0}" -gt 0 ]
+}
+
+# ── Kometa first-run trigger (remote) ─────────────────────────────────────────
+trigger_kometa_first_run_remote() {
+    local plex_host="$1" plex_appdata="$2"
+    # shellcheck disable=SC2086
+    local result
+    result=$($SSH_CMD "${SSH_USER}@${plex_host}" "
+        if [ -f '${plex_appdata}/kometa/.first-run-triggered' ]; then
+            echo 'already_done'
+        elif ! docker ps --format '{{.Names}}' | grep -q '^kometa\$'; then
+            echo 'not_running'
+        else
+            docker exec -d kometa python kometa.py --run
+            touch '${plex_appdata}/kometa/.first-run-triggered'
+            echo 'triggered'
+        fi
+    " 2>/dev/null || echo "failed")
+    case "$result" in
+        already_done) log "Kometa first run already triggered previously"; return 0 ;;
+        triggered)
+            log "Kometa first run started in background"
+            echo -e "  ${DIM}Takes hours. Check: ssh ${SSH_USER}@${plex_host} docker logs -f kometa${NC}"
+            return 0 ;;
+        not_running) warn "Kometa container not running"; return 1 ;;
+        *) warn "Could not trigger Kometa"; return 1 ;;
+    esac
+}
+
+# ── Overseerr auto-config (remote) ────────────────────────────────────────────
+configure_overseerr_remote() {
+    local plex_host="$1" arr_host="$2" radarr_key="$3" sonarr_key="$4" plex_appdata="$5"
+
+    if [ -z "$radarr_key" ] && [ -z "$sonarr_key" ]; then
+        warn "Overseerr: no *arr API keys discovered — skipping auto-config"
+        return 1
+    fi
+
+    info "Configuring Overseerr → Radarr/Sonarr..."
+
+    # Read Overseerr API key from target via SSH
+    local os_key
+    # shellcheck disable=SC2086
+    os_key=$($SSH_CMD "${SSH_USER}@${plex_host}" \
+        "jq -r '.main.apiKey // empty' '${plex_appdata}/overseerr/config/settings.json' 2>/dev/null" || echo "")
+    if [ -z "$os_key" ]; then
+        warn "Overseerr not initialized — complete setup wizard at http://${plex_host}:5055 first"
+        return 1
+    fi
+
+    local os_url="http://${plex_host}:5055/api/v1"
+
+    # Wait for API
+    local ready=false
+    for _ in $(seq 1 10); do
+        if curl -sf -o /dev/null "${os_url}/settings/public" 2>/dev/null; then
+            ready=true; break
+        fi
+        sleep 2
+    done
+    if [ "$ready" = false ]; then
+        warn "Overseerr API not responding at http://${plex_host}:5055"
+        return 1
+    fi
+
+    # Check if initialized
+    local initialized
+    initialized=$(curl -sf "${os_url}/settings/public" 2>/dev/null | jq -r '.initialized // false' 2>/dev/null || echo "false")
+    if [ "$initialized" != "true" ]; then
+        warn "Overseerr not initialized — complete setup wizard first"
+        return 1
+    fi
+
+    # --- Radarr ---
+    if [ -n "$radarr_key" ]; then
+        local existing
+        existing=$(curl -sf "${os_url}/settings/radarr" -H "X-Api-Key: ${os_key}" 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+        if [ "${existing:-0}" -eq 0 ]; then
+            local prof_id prof_name root_path
+            prof_id=$(curl -sf "http://${arr_host}:7878/api/v3/qualityprofile" -H "X-Api-Key: ${radarr_key}" 2>/dev/null | jq '.[0].id // 1' 2>/dev/null || echo "1")
+            prof_name=$(curl -sf "http://${arr_host}:7878/api/v3/qualityprofile" -H "X-Api-Key: ${radarr_key}" 2>/dev/null | jq -r '.[0].name // "Any"' 2>/dev/null || echo "Any")
+            root_path=$(curl -sf "http://${arr_host}:7878/api/v3/rootfolder" -H "X-Api-Key: ${radarr_key}" 2>/dev/null | jq -r '.[0].path // "/movies"' 2>/dev/null || echo "/movies")
+
+            curl -sf -X POST "${os_url}/settings/radarr" \
+                -H "X-Api-Key: ${os_key}" \
+                -H "Content-Type: application/json" \
+                -d "{
+                    \"name\": \"Radarr\",
+                    \"hostname\": \"${arr_host}\",
+                    \"port\": 7878,
+                    \"apiKey\": \"${radarr_key}\",
+                    \"useSsl\": false,
+                    \"baseUrl\": \"\",
+                    \"activeProfileId\": ${prof_id},
+                    \"activeProfileName\": \"${prof_name}\",
+                    \"activeDirectory\": \"${root_path}\",
+                    \"is4k\": false,
+                    \"minimumAvailability\": \"released\",
+                    \"isDefault\": true,
+                    \"externalUrl\": \"\",
+                    \"syncEnabled\": false,
+                    \"preventSearch\": false
+                }" > /dev/null 2>&1 && \
+                log "  Overseerr → Radarr (${arr_host}:7878)" || \
+                warn "  Overseerr → Radarr failed"
+        else
+            log "  Overseerr → Radarr already configured"
+        fi
+    fi
+
+    # --- Sonarr ---
+    if [ -n "$sonarr_key" ]; then
+        local existing
+        existing=$(curl -sf "${os_url}/settings/sonarr" -H "X-Api-Key: ${os_key}" 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
+        if [ "${existing:-0}" -eq 0 ]; then
+            local prof_id prof_name root_path anime_path
+            prof_id=$(curl -sf "http://${arr_host}:8989/api/v3/qualityprofile" -H "X-Api-Key: ${sonarr_key}" 2>/dev/null | jq '.[0].id // 1' 2>/dev/null || echo "1")
+            prof_name=$(curl -sf "http://${arr_host}:8989/api/v3/qualityprofile" -H "X-Api-Key: ${sonarr_key}" 2>/dev/null | jq -r '.[0].name // "Any"' 2>/dev/null || echo "Any")
+            root_path=$(curl -sf "http://${arr_host}:8989/api/v3/rootfolder" -H "X-Api-Key: ${sonarr_key}" 2>/dev/null | jq -r '.[0].path // "/tv"' 2>/dev/null || echo "/tv")
+            anime_path=$(curl -sf "http://${arr_host}:8989/api/v3/rootfolder" -H "X-Api-Key: ${sonarr_key}" 2>/dev/null | jq -r '[.[] | select(.path | test("anime"))] | .[0].path // "/anime"' 2>/dev/null || echo "/anime")
+
+            curl -sf -X POST "${os_url}/settings/sonarr" \
+                -H "X-Api-Key: ${os_key}" \
+                -H "Content-Type: application/json" \
+                -d "{
+                    \"name\": \"Sonarr\",
+                    \"hostname\": \"${arr_host}\",
+                    \"port\": 8989,
+                    \"apiKey\": \"${sonarr_key}\",
+                    \"useSsl\": false,
+                    \"baseUrl\": \"\",
+                    \"activeProfileId\": ${prof_id},
+                    \"activeProfileName\": \"${prof_name}\",
+                    \"activeDirectory\": \"${root_path}\",
+                    \"activeAnimeProfileId\": ${prof_id},
+                    \"activeAnimeProfileName\": \"${prof_name}\",
+                    \"activeAnimeDirectory\": \"${anime_path}\",
+                    \"is4k\": false,
+                    \"enableSeasonFolders\": true,
+                    \"isDefault\": true,
+                    \"externalUrl\": \"\",
+                    \"syncEnabled\": false,
+                    \"preventSearch\": false
+                }" > /dev/null 2>&1 && \
+                log "  Overseerr → Sonarr (${arr_host}:8989)" || \
+                warn "  Overseerr → Sonarr failed"
+        else
+            log "  Overseerr → Sonarr already configured"
+        fi
+    fi
+}
+
 PLEX_LOG=$(mktemp)
 ARR_LOG=$(mktemp)
 trap 'rm -f "$PLEX_ENV_FILE" "$ARR_ENV_FILE" "$PLEX_LOG" "$ARR_LOG"' EXIT
 
-echo -e "  ${BOLD}Launching both init scripts in parallel...${NC}"
-echo -e "  ${DIM}This takes 2-5 minutes per machine. Streaming output below.${NC}\n"
+if [ "$SINGLE_MACHINE" = true ]; then
+    echo -e "  ${BOLD}Running both init scripts sequentially on ${PLEX_IP_ADDR}...${NC}"
+    echo -e "  ${DIM}This takes 5-10 minutes. Streaming output below.${NC}\n"
 
-# Launch both in background
-run_init "$PLEX_IP_ADDR" "Plex" "init-machine1-plex.sh" > "$PLEX_LOG" 2>&1 &
-PLEX_PID=$!
-
-run_init "$ARR_IP_ADDR" "Arr" "init-machine2-arr.sh" > "$ARR_LOG" 2>&1 &
-ARR_PID=$!
-
-# ===========================================================================
-header "Phase 7: Live Output"
-# ===========================================================================
-
-# Stream labeled output from both logs
-tail_with_label() {
-    local file="$1" label="$2" pid="$3"
-    while kill -0 "$pid" 2>/dev/null || [ -s "$file" ]; do
-        if [ -f "$file" ]; then
-            while IFS= read -r line; do
-                echo -e "${BOLD}[${label}]${NC} $line"
-            done < <(tail -f "$file" 2>/dev/null &
-                TAIL_PID=$!
-                # Wait for the main process to finish, then kill tail
-                while kill -0 "$pid" 2>/dev/null; do sleep 1; done
-                sleep 2
-                kill "$TAIL_PID" 2>/dev/null || true
-            )
-            break
-        fi
-        sleep 1
+    echo -e "${BOLD}━━━ SPYGLASS (Plex) ━━━${NC}"
+    run_init "$PLEX_IP_ADDR" "Spyglass" "init-machine1-plex.sh" 2>&1 | while IFS= read -r line; do
+        echo -e "${BOLD}[SPYGLASS]${NC} $line"
     done
-}
+    PLEX_RESULT=${PIPESTATUS[0]}
 
-# Simpler approach: wait and dump labeled output
-(
+    echo ""
+    echo -e "${BOLD}━━━ PRIVATEER (*arr) ━━━${NC}"
+    run_init "$PLEX_IP_ADDR" "Privateer" "init-machine2-arr.sh" 2>&1 | while IFS= read -r line; do
+        echo -e "${BOLD}[PRIVATEER]${NC} $line"
+    done
+    ARR_RESULT=${PIPESTATUS[0]}
+else
+    echo -e "  ${BOLD}Launching both init scripts in parallel...${NC}"
+    echo -e "  ${DIM}This takes 2-5 minutes per machine. Streaming output below.${NC}\n"
+
+    # Launch both in background
+    run_init "$PLEX_IP_ADDR" "Spyglass" "init-machine1-plex.sh" > "$PLEX_LOG" 2>&1 &
+    PLEX_PID=$!
+
+    run_init "$ARR_IP_ADDR" "Privateer" "init-machine2-arr.sh" > "$ARR_LOG" 2>&1 &
+    ARR_PID=$!
+
+    # ===========================================================================
+    header "Phase 7: Live Output"
+    # ===========================================================================
+
+    # Wait and dump labeled output
+    (
+        wait "$PLEX_PID" 2>/dev/null
+        PLEX_EXIT=$?
+        echo ""
+        echo -e "${BOLD}━━━ SPYGLASS OUTPUT ━━━${NC}"
+        if [ -f "$PLEX_LOG" ]; then
+            while IFS= read -r line; do
+                echo -e "${BOLD}[SPYGLASS]${NC} $line"
+            done < "$PLEX_LOG"
+        fi
+        if [ "$PLEX_EXIT" -eq 0 ]; then
+            echo -e "${BOLD}[SPYGLASS]${NC} ${GREEN}Deploy complete ✓${NC}"
+        else
+            echo -e "${BOLD}[SPYGLASS]${NC} ${RED}Deploy failed (exit $PLEX_EXIT)${NC}"
+        fi
+    ) &
+    PLEX_OUTPUT_PID=$!
+
+    (
+        wait "$ARR_PID" 2>/dev/null
+        ARR_EXIT=$?
+        echo ""
+        echo -e "${BOLD}━━━ PRIVATEER OUTPUT ━━━${NC}"
+        if [ -f "$ARR_LOG" ]; then
+            while IFS= read -r line; do
+                echo -e "${BOLD}[PRIVATEER]${NC} $line"
+            done < "$ARR_LOG"
+        fi
+        if [ "$ARR_EXIT" -eq 0 ]; then
+            echo -e "${BOLD}[PRIVATEER]${NC} ${GREEN}Deploy complete ✓${NC}"
+        else
+            echo -e "${BOLD}[PRIVATEER]${NC} ${RED}Deploy failed (exit $ARR_EXIT)${NC}"
+        fi
+    ) &
+    ARR_OUTPUT_PID=$!
+
+    # Wait for both output processes
+    wait "$PLEX_OUTPUT_PID" 2>/dev/null || true
+    wait "$ARR_OUTPUT_PID" 2>/dev/null || true
+
+    # Capture exit codes
     wait "$PLEX_PID" 2>/dev/null
-    PLEX_EXIT=$?
-    echo ""
-    echo -e "${BOLD}━━━ PLEX OUTPUT ━━━${NC}"
-    if [ -f "$PLEX_LOG" ]; then
-        while IFS= read -r line; do
-            echo -e "${BOLD}[PLEX]${NC} $line"
-        done < "$PLEX_LOG"
-    fi
-    if [ "$PLEX_EXIT" -eq 0 ]; then
-        echo -e "${BOLD}[PLEX]${NC} ${GREEN}Deploy complete ✓${NC}"
-    else
-        echo -e "${BOLD}[PLEX]${NC} ${RED}Deploy failed (exit $PLEX_EXIT)${NC}"
-    fi
-) &
-PLEX_OUTPUT_PID=$!
-
-(
+    PLEX_RESULT=$?
     wait "$ARR_PID" 2>/dev/null
-    ARR_EXIT=$?
-    echo ""
-    echo -e "${BOLD}━━━ ARR OUTPUT ━━━${NC}"
-    if [ -f "$ARR_LOG" ]; then
-        while IFS= read -r line; do
-            echo -e "${BOLD}[ARR]${NC}  $line"
-        done < "$ARR_LOG"
-    fi
-    if [ "$ARR_EXIT" -eq 0 ]; then
-        echo -e "${BOLD}[ARR]${NC}  ${GREEN}Deploy complete ✓${NC}"
-    else
-        echo -e "${BOLD}[ARR]${NC}  ${RED}Deploy failed (exit $ARR_EXIT)${NC}"
-    fi
-) &
-ARR_OUTPUT_PID=$!
-
-# Wait for both output processes
-wait "$PLEX_OUTPUT_PID" 2>/dev/null || true
-wait "$ARR_OUTPUT_PID" 2>/dev/null || true
-
-# Capture exit codes
-wait "$PLEX_PID" 2>/dev/null
-PLEX_RESULT=$?
-wait "$ARR_PID" 2>/dev/null
-ARR_RESULT=$?
+    ARR_RESULT=$?
+fi
 
 # ===========================================================================
 header "Phase 8: Post-Deploy Summary"
@@ -496,15 +726,51 @@ ARR_API_KEYS=""
 # shellcheck disable=SC2086
 ARR_API_KEYS=$($SSH_CMD "${SSH_USER}@${ARR_IP_ADDR}" "cat ${REMOTE_PROJECT_PATH}/machine2-arr/.env 2>/dev/null" || echo "")
 
+# Extract API keys for Overseerr config and summary display
+RADARR_KEY=""
+SONARR_KEY=""
+if [ -n "$ARR_API_KEYS" ]; then
+    RADARR_KEY=$(echo "$ARR_API_KEYS" | grep '^RADARR_API_KEY=' | cut -d= -f2)
+    SONARR_KEY=$(echo "$ARR_API_KEYS" | grep '^SONARR_API_KEY=' | cut -d= -f2)
+fi
+
+# Overseerr auto-config — wire up Radarr/Sonarr connections
+OVERSEERR_CONFIGURED=false
+if [ "$PLEX_RESULT" -eq 0 ] && [ "$ARR_RESULT" -eq 0 ]; then
+    if command -v jq &>/dev/null && command -v curl &>/dev/null; then
+        if [ -n "$RADARR_KEY" ] || [ -n "$SONARR_KEY" ]; then
+            header "Overseerr → Radarr/Sonarr"
+            configure_overseerr_remote "$PLEX_IP_ADDR" "$ARR_IP_ADDR" "$RADARR_KEY" "$SONARR_KEY" "$PLEX_APPDATA" && \
+                OVERSEERR_CONFIGURED=true
+        fi
+    else
+        warn "Overseerr auto-config: install curl + jq on desktop to enable"
+    fi
+fi
+
+# Kometa first run trigger
+KOMETA_TRIGGERED=false
+if [ "$PLEX_RESULT" -eq 0 ]; then
+    if command -v jq &>/dev/null && command -v curl &>/dev/null; then
+        if check_plex_has_libraries_remote "$PLEX_IP_ADDR" "${PLEX_TOKEN:-}"; then
+            trigger_kometa_first_run_remote "$PLEX_IP_ADDR" "$PLEX_APPDATA" && KOMETA_TRIGGERED=true
+        fi
+    fi
+fi
+
 echo ""
 if [ "$PLEX_RESULT" -eq 0 ] && [ "$ARR_RESULT" -eq 0 ]; then
-    log "Both machines deployed successfully!"
+    if [ "$SINGLE_MACHINE" = true ]; then
+        log "Both stacks deployed successfully on single machine!"
+    else
+        log "Both machines deployed successfully!"
+    fi
 elif [ "$PLEX_RESULT" -eq 0 ]; then
-    log "Plex deployed successfully"
-    err "*arr deploy failed — check output above"
+    log "Spyglass (Plex) deployed successfully"
+    err "Privateer (*arr) deploy failed — check output above"
 elif [ "$ARR_RESULT" -eq 0 ]; then
-    err "Plex deploy failed — check output above"
-    log "*arr deployed successfully"
+    err "Spyglass (Plex) deploy failed — check output above"
+    log "Privateer (*arr) deployed successfully"
 else
     err "Both deploys failed — check output above"
 fi
@@ -512,14 +778,14 @@ fi
 echo ""
 echo -e "  ${BOLD}═══ Service URLs ═══${NC}"
 echo ""
-echo -e "  ${BOLD}Plex Machine (${PLEX_IP_ADDR}):${NC}"
+echo -e "  ${BOLD}Spyglass — Plex (${PLEX_IP_ADDR}):${NC}"
 echo -e "    Plex        → http://${PLEX_IP_ADDR}:32400/web"
 echo -e "    Tdarr       → http://${PLEX_IP_ADDR}:8265"
 echo -e "    Overseerr   → http://${PLEX_IP_ADDR}:5055"
 echo -e "    Tautulli    → http://${PLEX_IP_ADDR}:8181"
 echo -e "    Homepage    → http://${PLEX_IP_ADDR}:3100"
 echo ""
-echo -e "  ${BOLD}*arr Machine (${ARR_IP_ADDR}):${NC}"
+echo -e "  ${BOLD}Privateer — *arr (${ARR_IP_ADDR}):${NC}"
 echo -e "    Radarr      → http://${ARR_IP_ADDR}:7878"
 echo -e "    Sonarr      → http://${ARR_IP_ADDR}:8989"
 echo -e "    Lidarr      → http://${ARR_IP_ADDR}:8686"
@@ -529,40 +795,134 @@ echo -e "    Prowlarr    → http://${ARR_IP_ADDR}:9696"
 echo -e "    Bazarr      → http://${ARR_IP_ADDR}:6767"
 echo -e "    qBittorrent → http://${ARR_IP_ADDR}:8080"
 echo -e "    SABnzbd     → http://${ARR_IP_ADDR}:8085"
-echo -e "    Homepage    → http://${ARR_IP_ADDR}:3100"
+echo -e "    Homepage    → http://${ARR_IP_ADDR}:3101"
 echo -e "    Dozzle      → http://${ARR_IP_ADDR}:8888"
 
-echo ""
-echo -e "  ${BOLD}═══ Cross-Machine Config ═══${NC}"
-echo ""
-echo -e "  ${DIM}Overseerr (on Plex) needs to connect to the *arr machine:${NC}"
-echo -e "    Radarr URL: http://${ARR_IP_ADDR}:7878"
-echo -e "    Sonarr URL: http://${ARR_IP_ADDR}:8989"
+if [ "$SINGLE_MACHINE" = false ]; then
+    echo ""
+    echo -e "  ${BOLD}═══ Cross-Machine Config ═══${NC}"
+    echo ""
+    echo -e "  ${DIM}Overseerr (on Spyglass) needs to connect to Privateer:${NC}"
+    echo -e "    Radarr URL: http://${ARR_IP_ADDR}:7878"
+    echo -e "    Sonarr URL: http://${ARR_IP_ADDR}:8989"
 
-# Show API keys if we got them
-if [ -n "$ARR_API_KEYS" ]; then
-    RADARR_KEY=$(echo "$ARR_API_KEYS" | grep '^RADARR_API_KEY=' | cut -d= -f2)
-    SONARR_KEY=$(echo "$ARR_API_KEYS" | grep '^SONARR_API_KEY=' | cut -d= -f2)
+    # Show API keys if we got them
     if [ -n "$RADARR_KEY" ] && [ -n "$SONARR_KEY" ]; then
         echo -e "    Radarr API Key: ${RADARR_KEY}"
         echo -e "    Sonarr API Key: ${SONARR_KEY}"
     fi
+else
+    echo ""
+    echo -e "  ${DIM}Overseerr → Radarr/Sonarr: use http://localhost:PORT (same machine)${NC}"
 fi
 
 echo ""
 echo -e "  ${BOLD}═══ Still Needs Your Eyeballs ═══${NC}"
 echo ""
-echo -e "  ${BOLD}Plex:${NC}"
+echo -e "  ${BOLD}Spyglass (Plex):${NC}"
 echo -e "    → Complete setup wizard at http://${PLEX_IP_ADDR}:32400/web"
 echo -e "    → Add media libraries"
+if [ "$OVERSEERR_CONFIGURED" = true ]; then
+    echo -e "    → Overseerr: sign in with Plex (Radarr/Sonarr auto-configured)"
+else
+    echo -e "    → Overseerr: sign in with Plex, then connect Radarr/Sonarr"
+fi
 echo -e "    → Configure Tdarr plugins (see init output above)"
 echo ""
-echo -e "  ${BOLD}*arr:${NC}"
+echo -e "  ${BOLD}Privateer (*arr):${NC}"
 echo -e "    → Prowlarr: add your indexers (credentials required)"
 echo -e "    → SABnzbd: run setup wizard, add Usenet servers"
 echo -e "    → Bazarr: add subtitle providers (OpenSubtitles.com)"
-echo -e "    → Overseerr: connect to Plex + Radarr/Sonarr"
 echo ""
-echo -e "  ${DIM}Project files synced to ${REMOTE_PROJECT_PATH} on both machines.${NC}"
-echo -e "  ${DIM}To re-run on a specific machine, SSH in and run the init script directly.${NC}"
+echo -e "  ${DIM}Project files synced to ${REMOTE_PROJECT_PATH}.${NC}"
+echo -e "  ${DIM}To re-run, SSH in and run the init script directly.${NC}"
 echo ""
+
+# ── Post-deploy polling (Overseerr + Kometa) ──────────────────────────────────
+NEED_OVERSEERR_POLL=false
+NEED_KOMETA_POLL=false
+
+if [ "${OVERSEERR_CONFIGURED:-false}" != true ] && \
+   [ "$PLEX_RESULT" -eq 0 ] && [ "$ARR_RESULT" -eq 0 ] && \
+   { [ -n "$RADARR_KEY" ] || [ -n "$SONARR_KEY" ]; } && \
+   command -v jq &>/dev/null && command -v curl &>/dev/null; then
+    NEED_OVERSEERR_POLL=true
+fi
+
+if [ "${KOMETA_TRIGGERED:-false}" != true ] && [ "$PLEX_RESULT" -eq 0 ] && \
+   command -v jq &>/dev/null && command -v curl &>/dev/null; then
+    NEED_KOMETA_POLL=true
+fi
+
+if [ "$NEED_OVERSEERR_POLL" = true ] || [ "$NEED_KOMETA_POLL" = true ]; then
+    header "Waiting for Manual Steps"
+
+    if [ "$NEED_OVERSEERR_POLL" = true ]; then
+        echo -e "  ${BOLD}Overseerr:${NC}"
+        echo -e "    1. Open ${BOLD}http://${PLEX_IP_ADDR}:5055${NC}"
+        echo -e "    2. Sign in with your Plex account"
+        echo -e "    3. Complete the setup wizard"
+        echo -e "    ${DIM}→ Radarr/Sonarr will be auto-configured${NC}"
+        echo ""
+    fi
+
+    if [ "$NEED_KOMETA_POLL" = true ]; then
+        echo -e "  ${BOLD}Plex Libraries:${NC}"
+        echo -e "    1. Open ${BOLD}http://${PLEX_IP_ADDR}:32400/web${NC}"
+        echo -e "    2. Complete setup wizard + add media libraries"
+        echo -e "    ${DIM}→ Kometa first run will auto-start${NC}"
+        echo ""
+    fi
+
+    info "Checking every 60 seconds... (Ctrl+C to skip)"
+    echo ""
+
+    POLL_ELAPSED=0
+    POLL_MAX=7200
+    POLL_INTERVAL=60
+
+    while [ $POLL_ELAPSED -lt $POLL_MAX ]; do
+        sleep $POLL_INTERVAL
+        POLL_ELAPSED=$((POLL_ELAPSED + POLL_INTERVAL))
+        POLL_MINS=$((POLL_ELAPSED / 60))
+
+        # Check Overseerr
+        if [ "$NEED_OVERSEERR_POLL" = true ] && check_overseerr_ready_remote "$PLEX_IP_ADDR" "$PLEX_APPDATA"; then
+            log "Overseerr is ready! Configuring Radarr/Sonarr..."
+            if configure_overseerr_remote "$PLEX_IP_ADDR" "$ARR_IP_ADDR" "$RADARR_KEY" "$SONARR_KEY" "$PLEX_APPDATA"; then
+                OVERSEERR_CONFIGURED=true
+                NEED_OVERSEERR_POLL=false
+                log "Overseerr → Radarr + Sonarr configured!"
+            fi
+        fi
+
+        # Check Plex libraries → Kometa
+        if [ "$NEED_KOMETA_POLL" = true ] && check_plex_has_libraries_remote "$PLEX_IP_ADDR" "${PLEX_TOKEN:-}"; then
+            if trigger_kometa_first_run_remote "$PLEX_IP_ADDR" "$PLEX_APPDATA"; then
+                KOMETA_TRIGGERED=true
+                NEED_KOMETA_POLL=false
+            fi
+        fi
+
+        # All done?
+        if [ "$NEED_OVERSEERR_POLL" = false ] && [ "$NEED_KOMETA_POLL" = false ]; then
+            echo ""
+            log "All post-deploy automation complete!"
+            break
+        fi
+
+        # Status
+        WAITING_FOR=""
+        [ "$NEED_OVERSEERR_POLL" = true ] && WAITING_FOR="Overseerr wizard"
+        if [ "$NEED_KOMETA_POLL" = true ]; then
+            [ -n "$WAITING_FOR" ] && WAITING_FOR="$WAITING_FOR + "
+            WAITING_FOR="${WAITING_FOR}Plex libraries"
+        fi
+        info "Waiting for ${WAITING_FOR}... (${POLL_MINS}m elapsed)"
+    done
+
+    if [ $POLL_ELAPSED -ge $POLL_MAX ]; then
+        [ "$NEED_OVERSEERR_POLL" = true ] && warn "Overseerr: timed out. Re-run to configure."
+        [ "$NEED_KOMETA_POLL" = true ] && warn "Kometa: timed out. Run manually: docker exec kometa python kometa.py --run"
+    fi
+fi
