@@ -1,0 +1,157 @@
+# =============================================================================
+# Machine 1: Plex Server (i5-8500 / 32GB)
+# =============================================================================
+# Quick Sync iGPU transcoding, library optimization, aesthetics, monitoring.
+# Init script: ../scripts/init-machine1-plex.sh
+# =============================================================================
+
+networks:
+  media-net:
+    driver: bridge
+
+services:
+
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: tailscale
+    hostname: plex-server
+    restart: unless-stopped
+    cap_add: [NET_ADMIN, NET_RAW]
+    volumes:
+      - ${APPDATA}/tailscale/state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - TS_AUTHKEY=${TAILSCALE_AUTH_KEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_EXTRA_ARGS=--advertise-exit-node --advertise-routes=${LOCAL_SUBNET:-192.168.1.0/24}
+    networks: [media-net]
+
+  plex:
+    image: linuxserver/plex:latest
+    container_name: plex
+    restart: unless-stopped
+    network_mode: host
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - VERSION=docker
+      - PLEX_CLAIM=${PLEX_CLAIM_TOKEN}
+    volumes:
+      - ${APPDATA}/plex/config:/config
+      - ${APPDATA}/plex/transcode:/transcode
+      - ${MEDIA_ROOT}/movies:/movies:ro
+      - ${MEDIA_ROOT}/tv:/tv:ro
+      - ${MEDIA_ROOT}/music:/music:ro
+      - ${MEDIA_ROOT}/anime:/anime:ro
+      - ${MEDIA_ROOT}/documentaries:/documentaries:ro
+      - ${MEDIA_ROOT}/concerts:/concerts:ro
+      - ${MEDIA_ROOT}/stand-up:/stand-up:ro
+      - ${MEDIA_ROOT}/anime-movies:/anime-movies:ro
+
+  tdarr:
+    image: ghcr.io/haveagitgat/tdarr:latest
+    container_name: tdarr
+    restart: unless-stopped
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - serverIP=0.0.0.0
+      - serverPort=8266
+      - webUIPort=8265
+      - internalNode=true
+      - inContainer=true
+      - ffmpegVersion=7
+      - nodeName=plex-server
+    ports:
+      - "8265:8265"
+      - "8266:8266"
+    volumes:
+      - ${APPDATA}/tdarr/server:/app/server
+      - ${APPDATA}/tdarr/configs:/app/configs
+      - ${APPDATA}/tdarr/logs:/app/logs
+      - ${APPDATA}/tdarr/transcode_cache:/temp
+      - ${MEDIA_ROOT}/movies:/movies
+      - ${MEDIA_ROOT}/tv:/tv
+      - ${MEDIA_ROOT}/music:/music
+      - ${MEDIA_ROOT}/anime:/anime
+      - ${MEDIA_ROOT}/documentaries:/documentaries
+      - ${MEDIA_ROOT}/stand-up:/stand-up
+      - ${MEDIA_ROOT}/concerts:/concerts
+      - ${MEDIA_ROOT}/anime-movies:/anime-movies
+    networks: [media-net]
+
+  kometa:
+    image: kometateam/kometa:latest
+    container_name: kometa
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - KOMETA_RUN=true
+      - KOMETA_TIME=04:00
+    volumes:
+      - ${APPDATA}/kometa/config:/config
+    networks: [media-net]
+
+  overseerr:
+    image: linuxserver/overseerr:latest
+    container_name: overseerr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    ports:
+      - "5055:5055"
+    volumes:
+      - ${APPDATA}/overseerr/config:/config
+    networks: [media-net]
+
+  tautulli:
+    image: linuxserver/tautulli:latest
+    container_name: tautulli
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    ports:
+      - "8181:8181"
+    volumes:
+      - ${APPDATA}/tautulli/config:/config
+    networks: [media-net]
+
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: homepage
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+    ports:
+      - "3100:3000"
+    volumes:
+      - ${APPDATA}/homepage/config:/app/config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [media-net]
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_SCHEDULE=0 0 5 * * *
+      - WATCHTOWER_NOTIFICATIONS=shoutrrr
+      - WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [media-net]

@@ -1,0 +1,15 @@
+# Environment files (contain secrets)
+.env
+*.env
+
+# Editor swap files
+*.swp
+*.swo
+*~
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Mal state files (session-specific, not project code)
+.mal/

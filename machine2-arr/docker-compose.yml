@@ -1,0 +1,326 @@
+# =============================================================================
+# Machine 2: *arr Stack (Xeon E-2334 / 128GB)
+# =============================================================================
+# Download traffic through NordVPN/Gluetun. Everything else unmasked.
+# Init script: ../scripts/init-machine2-arr.sh
+# =============================================================================
+
+networks:
+  arr-net:
+    driver: bridge
+
+services:
+
+  # ── Remote Access ──────────────────────────────────────────────────────────
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: tailscale
+    hostname: arr-server
+    restart: unless-stopped
+    cap_add: [NET_ADMIN, NET_RAW]
+    volumes:
+      - ${APPDATA}/tailscale/state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - TS_AUTHKEY=${TAILSCALE_AUTH_KEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_EXTRA_ARGS=--advertise-exit-node
+    networks: [arr-net]
+
+  # ── VPN + Download Clients ─────────────────────────────────────────────────
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    restart: unless-stopped
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun:/dev/net/tun]
+    environment:
+      - VPN_SERVICE_PROVIDER=nordvpn
+      - VPN_TYPE=${NORD_VPN_TYPE:-openvpn}
+      - OPENVPN_USER=${NORD_USER}
+      - OPENVPN_PASSWORD=${NORD_PASS}
+      - SERVER_COUNTRIES=${NORD_COUNTRY:-United States}
+      - SERVER_CITIES=${NORD_CITY:-}
+      - WIREGUARD_PRIVATE_KEY=${NORD_WIREGUARD_KEY:-}
+      - FIREWALL_OUTBOUND_SUBNETS=${LOCAL_SUBNET:-192.168.1.0/24}
+      - DOT=off
+      - HEALTH_VPN_DURATION_INITIAL=30s
+      - HEALTH_SUCCESS_WAIT_DURATION=10s
+    ports:
+      - "8080:8080"       # qBittorrent UI
+      - "6881:6881"       # Torrent TCP
+      - "6881:6881/udp"   # Torrent UDP
+      - "8085:8085"       # SABnzbd UI
+    volumes:
+      - ${APPDATA}/gluetun:/gluetun
+    networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://ipinfo.io || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  qbittorrent:
+    image: linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    restart: unless-stopped
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun: { condition: service_healthy }
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - WEBUI_PORT=8080
+    volumes:
+      - ${APPDATA}/qbittorrent/config:/config
+      - ${DOWNLOADS_ROOT}/torrents:/downloads/torrents
+
+  sabnzbd:
+    image: linuxserver/sabnzbd:latest
+    container_name: sabnzbd
+    restart: unless-stopped
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun: { condition: service_healthy }
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${APPDATA}/sabnzbd/config:/config
+      - ${DOWNLOADS_ROOT}/usenet:/downloads/usenet
+
+  unpackerr:
+    image: golift/unpackerr:latest
+    container_name: unpackerr
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+      - UN_SONARR_0_URL=http://sonarr:8989
+      - UN_SONARR_0_API_KEY=${SONARR_API_KEY}
+      - UN_SONARR_0_PATHS_0=/downloads
+      - UN_SONARR_0_PROTOCOLS=torrent
+      - UN_RADARR_0_URL=http://radarr:7878
+      - UN_RADARR_0_API_KEY=${RADARR_API_KEY}
+      - UN_RADARR_0_PATHS_0=/downloads
+      - UN_RADARR_0_PROTOCOLS=torrent
+      - UN_LIDARR_0_URL=http://lidarr:8686
+      - UN_LIDARR_0_API_KEY=${LIDARR_API_KEY}
+      - UN_LIDARR_0_PATHS_0=/downloads
+      - UN_LIDARR_0_PROTOCOLS=torrent
+    volumes:
+      - ${DOWNLOADS_ROOT}:/downloads
+    networks: [arr-net]
+
+  # ── Indexer Management ─────────────────────────────────────────────────────
+  prowlarr:
+    image: linuxserver/prowlarr:latest
+    container_name: prowlarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    ports: ["9696:9696"]
+    volumes:
+      - ${APPDATA}/prowlarr/config:/config
+    networks: [arr-net]
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+      - LOG_HTML=false
+      - TZ=${TZ}
+    ports: ["8191:8191"]
+    networks: [arr-net]
+
+  # ── The *arr Suite ─────────────────────────────────────────────────────────
+  radarr:
+    image: linuxserver/radarr:latest
+    container_name: radarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    ports: ["7878:7878"]
+    volumes:
+      - ${APPDATA}/radarr/config:/config
+      - ${MEDIA_ROOT}/movies:/movies
+      - ${MEDIA_ROOT}/anime-movies:/anime-movies
+      - ${MEDIA_ROOT}/documentaries:/documentaries
+      - ${MEDIA_ROOT}/stand-up:/stand-up
+      - ${MEDIA_ROOT}/concerts:/concerts
+      - ${DOWNLOADS_ROOT}:/downloads
+    networks: [arr-net]
+
+  sonarr:
+    image: linuxserver/sonarr:latest
+    container_name: sonarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    ports: ["8989:8989"]
+    volumes:
+      - ${APPDATA}/sonarr/config:/config
+      - ${MEDIA_ROOT}/tv:/tv
+      - ${MEDIA_ROOT}/anime:/anime
+      - ${DOWNLOADS_ROOT}:/downloads
+    networks: [arr-net]
+
+  lidarr:
+    image: linuxserver/lidarr:latest
+    container_name: lidarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    ports: ["8686:8686"]
+    volumes:
+      - ${APPDATA}/lidarr/config:/config
+      - ${MEDIA_ROOT}/music:/music
+      - ${DOWNLOADS_ROOT}:/downloads
+    networks: [arr-net]
+
+  readarr:
+    image: linuxserver/readarr:develop
+    container_name: readarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    ports: ["8787:8787"]
+    volumes:
+      - ${APPDATA}/readarr/config:/config
+      - ${MEDIA_ROOT}/books:/books
+      - ${MEDIA_ROOT}/audiobooks:/audiobooks
+      - ${DOWNLOADS_ROOT}:/downloads
+    networks: [arr-net]
+
+  bazarr:
+    image: linuxserver/bazarr:latest
+    container_name: bazarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    ports: ["6767:6767"]
+    volumes:
+      - ${APPDATA}/bazarr/config:/config
+      - ${MEDIA_ROOT}/movies:/movies
+      - ${MEDIA_ROOT}/tv:/tv
+      - ${MEDIA_ROOT}/anime:/anime
+    networks: [arr-net]
+
+  whisparr:
+    image: ghcr.io/hotio/whisparr:latest
+    container_name: whisparr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    ports: ["6969:6969"]
+    volumes:
+      - ${APPDATA}/whisparr/config:/config
+      - ${MEDIA_ROOT}/adult:/adult
+      - ${DOWNLOADS_ROOT}:/downloads
+    networks: [arr-net]
+
+  # ── Quality & Automation ───────────────────────────────────────────────────
+  recyclarr:
+    image: ghcr.io/recyclarr/recyclarr:latest
+    container_name: recyclarr
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+    volumes:
+      - ${APPDATA}/recyclarr/config:/config
+    networks: [arr-net]
+
+  autobrr:
+    image: ghcr.io/autobrr/autobrr:latest
+    container_name: autobrr
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+    ports: ["7474:7474"]
+    volumes:
+      - ${APPDATA}/autobrr/config:/config
+    networks: [arr-net]
+
+  # ── Migration Tool (stop after library import is done) ─────────────────────
+  filebot:
+    image: jlesage/filebot:latest
+    container_name: filebot
+    restart: unless-stopped
+    environment:
+      - USER_ID=${PUID}
+      - GROUP_ID=${PGID}
+      - TZ=${TZ}
+    ports: ["5800:5800"]
+    volumes:
+      - ${APPDATA}/filebot/config:/config
+      - ${MEDIA_ROOT}:/storage:rw
+      - ${DOWNLOADS_ROOT}:/downloads:rw
+    networks: [arr-net]
+
+  # ── Notifications & Monitoring ─────────────────────────────────────────────
+  notifiarr:
+    image: golift/notifiarr:latest
+    container_name: notifiarr
+    restart: unless-stopped
+    environment:
+      - DN_API_KEY=${NOTIFIARR_API_KEY:-}
+      - TZ=${TZ}
+    ports: ["5454:5454"]
+    volumes:
+      - ${APPDATA}/notifiarr/config:/config
+      - /var/run/utmp:/var/run/utmp
+    networks: [arr-net]
+
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: homepage
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+    ports: ["3100:3000"]
+    volumes:
+      - ${APPDATA}/homepage/config:/app/config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [arr-net]
+
+  # ── Maintenance ────────────────────────────────────────────────────────────
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_SCHEDULE=0 0 5 * * *
+      - WATCHTOWER_NOTIFICATIONS=shoutrrr
+      - WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [arr-net]
+
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    restart: unless-stopped
+    ports: ["8888:8080"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [arr-net]

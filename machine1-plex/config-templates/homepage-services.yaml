@@ -1,0 +1,46 @@
+# =============================================================================
+# Homepage Dashboard — Services Configuration
+# =============================================================================
+# Deployed by init-machine1-plex.sh. Edit after deploy at:
+#   ${APPDATA}/homepage/config/services.yaml
+# Docs: https://gethomepage.dev/configs/services/
+# =============================================================================
+
+- Media:
+    - Plex:
+        icon: plex.svg
+        href: http://localhost:32400/web
+        description: Media server
+        widget:
+          type: plex
+          url: http://localhost:32400
+          key: "{{HOMEPAGE_VAR_PLEX_TOKEN}}"
+    - Overseerr:
+        icon: overseerr.svg
+        href: http://localhost:5055
+        description: Media requests
+        widget:
+          type: overseerr
+          url: http://localhost:5055
+          key: "{{HOMEPAGE_VAR_OVERSEERR_KEY}}"
+    - Tautulli:
+        icon: tautulli.svg
+        href: http://localhost:8181
+        description: Plex analytics
+        widget:
+          type: tautulli
+          url: http://localhost:8181
+          key: "{{HOMEPAGE_VAR_TAUTULLI_KEY}}"
+
+- Processing:
+    - Tdarr:
+        icon: tdarr.svg
+        href: http://localhost:8265
+        description: Transcode automation
+        widget:
+          type: tdarr
+          url: http://localhost:8265
+    - Kometa:
+        icon: kometa.svg
+        href: "#"
+        description: Library aesthetics (scheduled)

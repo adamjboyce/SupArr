@@ -1,0 +1,96 @@
+# =============================================================================
+# Kometa (Plex Meta Manager) Configuration
+# =============================================================================
+# Auto-deployed by init script. Credentials substituted from .env.
+# Manual edit: /opt/media-stack/kometa/config/config.yml
+# First run: docker exec kometa python kometa.py --run
+# =============================================================================
+
+libraries:
+  Movies:
+    collection_files:
+      - default: basic
+      - default: imdb
+      - default: tmdb
+      - default: trakt
+      - default: universe        # MCU, DCEU, Star Wars, LOTR, etc.
+      - default: studio          # Pixar, A24, Studio Ghibli, etc.
+      - default: seasonal        # Halloween, Christmas, Valentine's
+      - default: award           # Oscar Best Picture, Golden Globe
+      - default: decade
+      - default: genre
+      - default: resolution      # 4K Movies collection
+      - default: audio_language
+      - default: subtitle_language
+
+    overlay_files:
+      - default: resolution      # 4K, 1080p badge
+      - default: audio_codec     # Atmos, DTS:X, TrueHD
+      - default: video_format    # HDR, Dolby Vision
+      - default: ratings
+        template_variables:
+          rating1: critic
+          rating2: audience
+          rating3: user
+      - default: streaming       # Netflix, Disney+ availability
+
+    operations:
+      mass_critic_rating_update: mdb_tomatoesaudience
+      mass_audience_rating_update: mdb_imdb
+      mass_user_rating_update: mdb_tmdb
+      mass_genre_update: tmdb
+      mass_content_rating_update: mdb
+
+  TV Shows:
+    collection_files:
+      - default: basic
+      - default: tmdb
+      - default: trakt
+      - default: network
+      - default: genre
+      - default: resolution
+
+    overlay_files:
+      - default: resolution
+      - default: ratings
+        template_variables:
+          rating1: critic
+          rating2: audience
+          rating3: user
+      - default: streaming
+      - default: status          # Returning, Ended, Canceled
+
+    operations:
+      mass_critic_rating_update: mdb_tomatoesaudience
+      mass_audience_rating_update: mdb_imdb
+      mass_user_rating_update: mdb_tmdb
+
+settings:
+  run_order:
+    - operations
+    - metadata
+    - collections
+    - overlays
+  cache: true
+  cache_expiration: 60
+
+plex:
+  url: http://PLEX_SERVER_IP:32400
+  token: YOUR_PLEX_TOKEN
+
+tmdb:
+  apikey: YOUR_TMDB_API_KEY
+
+mdblist:
+  apikey: YOUR_MDBLIST_API_KEY
+
+trakt:
+  client_id: YOUR_TRAKT_ID
+  client_secret: YOUR_TRAKT_SECRET
+  authorization:
+    access_token:
+    token_type:
+    expires_in:
+    refresh_token:
+    scope:
+    created_at:
