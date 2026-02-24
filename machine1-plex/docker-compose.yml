@@ -50,6 +50,12 @@ services:
       - ${MEDIA_ROOT}/concerts:/concerts:ro
       - ${MEDIA_ROOT}/stand-up:/stand-up:ro
       - ${MEDIA_ROOT}/anime-movies:/anime-movies:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:32400/identity || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   tdarr:
     image: ghcr.io/haveagitgat/tdarr:latest
@@ -85,6 +91,12 @@ services:
       - ${MEDIA_ROOT}/concerts:/concerts
       - ${MEDIA_ROOT}/anime-movies:/anime-movies
     networks: [media-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8265 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   kometa:
     image: kometateam/kometa:latest
@@ -113,6 +125,12 @@ services:
     volumes:
       - ${APPDATA}/overseerr/config:/config
     networks: [media-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5055/api/v1/status || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   tautulli:
     image: linuxserver/tautulli:latest
@@ -127,6 +145,12 @@ services:
     volumes:
       - ${APPDATA}/tautulli/config:/config
     networks: [media-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8181/status || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   homepage:
     image: ghcr.io/gethomepage/homepage:latest
@@ -141,6 +165,12 @@ services:
       - ${APPDATA}/homepage/config:/app/config
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [media-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   watchtower:
     image: containrrr/watchtower:latest
@@ -155,3 +185,19 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks: [media-net]
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:latest
+    container_name: uptime-kuma
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - ${APPDATA}/uptime-kuma/data:/app/data
+    networks: [media-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3001 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

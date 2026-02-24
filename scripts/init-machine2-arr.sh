@@ -806,6 +806,80 @@ if [ "${QBIT_PASS:-adminadmin}" != "adminadmin" ]; then
 fi
 
 # ===========================================================================
+header "Phase 8c: Auto-Redownload on Failure + Discord Notifications"
+# ===========================================================================
+
+# Enable autoRedownloadFailed on all *arr apps — when a download fails,
+# *arr automatically searches for an alternative release
+enable_auto_redownload() {
+    local name="$1" host="$2" port="$3" api_ver="$4" api_key="$5"
+    if [ -z "$api_key" ]; then return; fi
+    local url="http://${host}:${port}/api/${api_ver}/config/downloadclient"
+    local config
+    config=$(arr_api "$url" "$api_key" 2>/dev/null)
+    if [ -n "$config" ] && [ "$config" != "null" ]; then
+        local updated
+        updated=$(echo "$config" | jq '.autoRedownloadFailed = true' 2>/dev/null)
+        if [ -n "$updated" ]; then
+            arr_api "$url" "$api_key" PUT "$updated" > /dev/null 2>&1 && \
+                log "  ${name}: auto-redownload on failure enabled" || true
+        fi
+    fi
+}
+
+info "Enabling auto-redownload on failure..."
+enable_auto_redownload "Radarr"  "$ARR_HOST" 7878 "v3" "${RADARR_API_KEY:-}"
+enable_auto_redownload "Sonarr"  "$ARR_HOST" 8989 "v3" "${SONARR_API_KEY:-}"
+enable_auto_redownload "Lidarr"  "$ARR_HOST" 8686 "v1" "${LIDARR_API_KEY:-}"
+enable_auto_redownload "Readarr" "$ARR_HOST" 8787 "v1" "${READARR_API_KEY:-}"
+enable_auto_redownload "Whisparr" "$ARR_HOST" 6969 "v3" "${WHISPARR_API_KEY:-}"
+
+# --- Discord notifications for all *arr apps ---
+if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+    info "Configuring Discord notifications..."
+
+    add_discord_notification() {
+        local name="$1" host="$2" port="$3" api_ver="$4" api_key="$5" bot_name="$6"
+        if [ -z "$api_key" ]; then return; fi
+        local url="http://${host}:${port}/api/${api_ver}/notification"
+
+        # Check if Discord notification already exists
+        local existing
+        existing=$(arr_api "$url" "$api_key" 2>/dev/null | jq '[.[] | select(.implementation=="Discord")] | length' 2>/dev/null || echo "0")
+        if [ "${existing:-0}" -gt 0 ]; then
+            log "  ${name}: Discord notification already configured"
+            return
+        fi
+
+        arr_api "$url" "$api_key" POST "{
+            \"name\": \"Discord\",
+            \"implementation\": \"Discord\",
+            \"configContract\": \"DiscordSettings\",
+            \"fields\": [
+                {\"name\": \"webHookUrl\", \"value\": \"${DISCORD_WEBHOOK_URL}\"},
+                {\"name\": \"username\", \"value\": \"${bot_name}\"}
+            ],
+            \"onGrab\": true,
+            \"onDownload\": true,
+            \"onUpgrade\": true,
+            \"onRename\": false,
+            \"onHealthIssue\": true,
+            \"onHealthRestored\": true,
+            \"onApplicationUpdate\": true,
+            \"includeHealthWarnings\": true
+        }" > /dev/null 2>&1 && \
+            log "  ${name}: Discord notifications enabled" || \
+            warn "  ${name}: could not add Discord notification"
+    }
+
+    add_discord_notification "Radarr"   "$ARR_HOST" 7878 "v3" "${RADARR_API_KEY:-}"   "Radarr"
+    add_discord_notification "Sonarr"   "$ARR_HOST" 8989 "v3" "${SONARR_API_KEY:-}"   "Sonarr"
+    add_discord_notification "Lidarr"   "$ARR_HOST" 8686 "v1" "${LIDARR_API_KEY:-}"   "Lidarr"
+    add_discord_notification "Readarr"  "$ARR_HOST" 8787 "v1" "${READARR_API_KEY:-}"  "Readarr"
+    add_discord_notification "Prowlarr" "$ARR_HOST" 9696 "v1" "${PROWLARR_API_KEY:-}" "Prowlarr"
+fi
+
+# ===========================================================================
 header "Phase 9: Summary"
 # ===========================================================================
 
@@ -832,6 +906,10 @@ echo "  │  ✓ Bazarr → Sonarr/Radarr, forced subs enabled    │"
 echo "  │  ✓ qBittorrent password changed                    │"
 echo "  │  ✓ Download client passwords synced                │"
 echo "  │  ✓ Recyclarr TRaSH quality profiles synced         │"
+echo "  │  ✓ Auto-redownload on failure enabled              │"
+echo "  │  ✓ Discord notifications configured (if webhook)   │"
+echo "  │  ✓ Download health monitoring active               │"
+echo "  │  ✓ Docker healthchecks on all services             │"
 echo "  └─────────────────────────────────────────────────────┘"
 echo ""
 warn "STILL NEEDS MANUAL SETUP:"

@@ -122,7 +122,7 @@ header "Phase 3: Directory Structure"
 info "Creating app data directories..."
 mkdir -p "$APPDATA"/{plex/{config,transcode},tdarr/{server,configs,logs,transcode_cache}}
 mkdir -p "$APPDATA"/{kometa/config,overseerr/config,tautulli/config}
-mkdir -p "$APPDATA"/{homepage/config,tailscale/state}
+mkdir -p "$APPDATA"/{homepage/config,tailscale/state,uptime-kuma/data}
 
 if [ "$REAL_USER" != "root" ]; then
     chown -R "$REAL_USER":"$REAL_USER" "$APPDATA"
@@ -285,6 +285,8 @@ echo "  │  ✓ Plex: hardware transcoding enabled              │"
 echo "  │  ✓ Plex: subtitle mode = foreign audio only        │"
 echo "  │  ✓ Plex: transcoder speed optimized                │"
 echo "  │  ✓ Plex: transcode temp on local SSD               │"
+echo "  │  ✓ Uptime Kuma monitoring dashboard                │"
+echo "  │  ✓ Docker healthchecks on all services             │"
 echo "  └─────────────────────────────────────────────────────┘"
 echo ""
 warn "STILL NEEDS MANUAL SETUP:"
@@ -312,7 +314,11 @@ echo "    → Connect Sonarr: http://PRIVATEER_IP:8989 (or localhost if single-m
 echo ""
 echo "  Tautulli  (http://localhost:8181)"
 echo "    → Auto-detects Plex on same machine"
-echo "    → Add notification agents as desired"
+echo "    → Add Discord webhook for playback notifications"
+echo ""
+echo "  Uptime Kuma  (http://localhost:3001)"
+echo "    → Create admin account on first visit"
+echo "    → Add monitors for all services (use healthcheck endpoints)"
 echo ""
 echo "  Kometa"
 echo "    → Verify config: $APPDATA/kometa/config/config.yml"

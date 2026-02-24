@@ -294,22 +294,33 @@ collect_arr_questions() {
 
 if [ "$ROLE" = "plex" ]; then
     collect_plex_questions
-    ask WATCHTOWER_NOTIFICATION_URL "Notification URL for updates (or 'skip')" "skip"
-    [ "$WATCHTOWER_NOTIFICATION_URL" = "skip" ] && WATCHTOWER_NOTIFICATION_URL=""
-    [ "$TAILSCALE_AUTH_KEY" = "skip" ] && TAILSCALE_AUTH_KEY=""
-
 elif [ "$ROLE" = "both" ]; then
     collect_plex_questions
     collect_arr_questions
-    ask WATCHTOWER_NOTIFICATION_URL "Watchtower notification URL (or 'skip')" "skip"
-    [ "$WATCHTOWER_NOTIFICATION_URL" = "skip" ] && WATCHTOWER_NOTIFICATION_URL=""
-    [ "$TAILSCALE_AUTH_KEY" = "skip" ] && TAILSCALE_AUTH_KEY=""
-
 else
     collect_arr_questions
-    ask WATCHTOWER_NOTIFICATION_URL "Watchtower notification URL (or 'skip')" "skip"
-    [ "$WATCHTOWER_NOTIFICATION_URL" = "skip" ] && WATCHTOWER_NOTIFICATION_URL=""
-    [ "$TAILSCALE_AUTH_KEY" = "skip" ] && TAILSCALE_AUTH_KEY=""
+fi
+
+[ "$TAILSCALE_AUTH_KEY" = "skip" ] && TAILSCALE_AUTH_KEY=""
+
+# ── Discord Notifications ─────────────────────────────────────────────────
+header "Discord Notifications"
+echo -e "  ${DIM}Get a webhook URL: Discord Server Settings → Integrations → Webhooks${NC}"
+echo -e "  ${DIM}Used for: *arr grab/import alerts, health issues, container updates${NC}\n"
+
+ask DISCORD_WEBHOOK_URL "Discord webhook URL (or 'skip')" "skip"
+[ "$DISCORD_WEBHOOK_URL" = "skip" ] && DISCORD_WEBHOOK_URL=""
+
+# Derive Watchtower shoutrrr URL from Discord webhook
+# https://discord.com/api/webhooks/ID/TOKEN → discord://TOKEN@ID
+WATCHTOWER_NOTIFICATION_URL=""
+if [ -n "$DISCORD_WEBHOOK_URL" ]; then
+    WEBHOOK_PATH="${DISCORD_WEBHOOK_URL##*/webhooks/}"
+    WEBHOOK_ID="${WEBHOOK_PATH%%/*}"
+    WEBHOOK_TOKEN="${WEBHOOK_PATH##*/}"
+    if [ -n "$WEBHOOK_ID" ] && [ -n "$WEBHOOK_TOKEN" ]; then
+        WATCHTOWER_NOTIFICATION_URL="discord://${WEBHOOK_TOKEN}@${WEBHOOK_ID}"
+    fi
 fi
 
 # ── Write .env ───────────────────────────────────────────────────────────────
@@ -338,6 +349,7 @@ TMDB_API_KEY=${TMDB_API_KEY}
 MDBLIST_API_KEY=${MDBLIST_API_KEY}
 TRAKT_CLIENT_ID=${TRAKT_CLIENT_ID}
 TRAKT_CLIENT_SECRET=${TRAKT_CLIENT_SECRET}
+DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
 WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL}
 ENVEOF
     chmod 600 "$target"
@@ -377,6 +389,7 @@ READARR_API_KEY=${READARR_API_KEY}
 WHISPARR_API_KEY=${WHISPARR_API_KEY}
 SABNZBD_API_KEY=${SABNZBD_API_KEY}
 NOTIFIARR_API_KEY=${NOTIFIARR_API_KEY}
+DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
 WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL}
 ENVEOF
     chmod 600 "$target"
@@ -673,6 +686,12 @@ if [ "$ROLE" = "plex" ] || [ "$ROLE" = "both" ]; then
     else
         echo -e "    ${BOLD}Kometa${NC}  →  Auto-starts when Plex libraries are detected"
     fi
+    echo ""
+    echo -e "    ${BOLD}Tautulli${NC}  →  http://localhost:8181"
+    echo -e "    ${DIM}Add Discord webhook for playback notifications${NC}"
+    echo ""
+    echo -e "    ${BOLD}Uptime Kuma${NC}  →  http://localhost:3001"
+    echo -e "    ${DIM}Create admin account, add monitors for all services${NC}"
     echo ""
 fi
 

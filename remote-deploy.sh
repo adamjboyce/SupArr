@@ -268,12 +268,25 @@ ask QBIT_PASSWORD "qBittorrent web UI password" "SupArr2026!" "secret"
 
 echo ""
 ask NOTIFIARR_API_KEY "Notifiarr API key (or 'skip')" "skip"
-ask PLEX_WATCHTOWER_URL "Plex Watchtower notification URL (or 'skip')" "skip"
-ask ARR_WATCHTOWER_URL "*arr Watchtower notification URL (or 'skip')" "skip"
-
 [ "$NOTIFIARR_API_KEY" = "skip" ] && NOTIFIARR_API_KEY=""
-[ "$PLEX_WATCHTOWER_URL" = "skip" ] && PLEX_WATCHTOWER_URL=""
-[ "$ARR_WATCHTOWER_URL" = "skip" ] && ARR_WATCHTOWER_URL=""
+
+echo ""
+echo -e "  ${BOLD}Discord Notifications${NC}"
+echo -e "  ${DIM}Get webhook URL: Server Settings → Integrations → Webhooks${NC}\n"
+ask DISCORD_WEBHOOK_URL "Discord webhook URL (or 'skip')" "skip"
+[ "$DISCORD_WEBHOOK_URL" = "skip" ] && DISCORD_WEBHOOK_URL=""
+
+# Derive Watchtower shoutrrr URL from Discord webhook
+# https://discord.com/api/webhooks/ID/TOKEN → discord://TOKEN@ID
+WATCHTOWER_NOTIFICATION_URL=""
+if [ -n "$DISCORD_WEBHOOK_URL" ]; then
+    WEBHOOK_PATH="${DISCORD_WEBHOOK_URL##*/webhooks/}"
+    WEBHOOK_ID="${WEBHOOK_PATH%%/*}"
+    WEBHOOK_TOKEN="${WEBHOOK_PATH##*/}"
+    if [ -n "$WEBHOOK_ID" ] && [ -n "$WEBHOOK_TOKEN" ]; then
+        WATCHTOWER_NOTIFICATION_URL="discord://${WEBHOOK_TOKEN}@${WEBHOOK_ID}"
+    fi
+fi
 
 # ===========================================================================
 header "Phase 3: SSH Key Setup"
@@ -353,7 +366,8 @@ TMDB_API_KEY=${TMDB_API_KEY}
 MDBLIST_API_KEY=${MDBLIST_API_KEY}
 TRAKT_CLIENT_ID=${TRAKT_CLIENT_ID}
 TRAKT_CLIENT_SECRET=${TRAKT_CLIENT_SECRET}
-WATCHTOWER_NOTIFICATION_URL=${PLEX_WATCHTOWER_URL}
+DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL}
 ENVEOF
 
 cat > "$ARR_ENV_FILE" <<ENVEOF
@@ -387,7 +401,8 @@ READARR_API_KEY=
 WHISPARR_API_KEY=
 SABNZBD_API_KEY=
 NOTIFIARR_API_KEY=${NOTIFIARR_API_KEY}
-WATCHTOWER_NOTIFICATION_URL=${ARR_WATCHTOWER_URL}
+DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL}
 ENVEOF
 
 log "Spyglass .env generated"
@@ -783,6 +798,7 @@ echo -e "    Plex        → http://${PLEX_IP_ADDR}:32400/web"
 echo -e "    Tdarr       → http://${PLEX_IP_ADDR}:8265"
 echo -e "    Overseerr   → http://${PLEX_IP_ADDR}:5055"
 echo -e "    Tautulli    → http://${PLEX_IP_ADDR}:8181"
+echo -e "    Uptime Kuma → http://${PLEX_IP_ADDR}:3001"
 echo -e "    Homepage    → http://${PLEX_IP_ADDR}:3100"
 echo ""
 echo -e "  ${BOLD}Privateer — *arr (${ARR_IP_ADDR}):${NC}"

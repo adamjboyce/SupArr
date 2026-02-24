@@ -75,6 +75,12 @@ services:
     volumes:
       - ${APPDATA}/qbittorrent/config:/config
       - ${DOWNLOADS_ROOT}/torrents:/downloads/torrents
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   sabnzbd:
     image: linuxserver/sabnzbd:latest
@@ -90,6 +96,12 @@ services:
     volumes:
       - ${APPDATA}/sabnzbd/config:/config
       - ${DOWNLOADS_ROOT}/usenet:/downloads/usenet
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8085 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   unpackerr:
     image: golift/unpackerr:latest
@@ -126,6 +138,12 @@ services:
     volumes:
       - ${APPDATA}/prowlarr/config:/config
     networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9696/ping || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
@@ -137,6 +155,12 @@ services:
       - TZ=${TZ}
     ports: ["8191:8191"]
     networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8191 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # ── The *arr Suite ─────────────────────────────────────────────────────────
   radarr:
@@ -157,6 +181,12 @@ services:
       - ${MEDIA_ROOT}/concerts:/concerts
       - ${DOWNLOADS_ROOT}:/downloads
     networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:7878/ping || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   sonarr:
     image: linuxserver/sonarr:latest
@@ -173,6 +203,12 @@ services:
       - ${MEDIA_ROOT}/anime:/anime
       - ${DOWNLOADS_ROOT}:/downloads
     networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8989/ping || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   lidarr:
     image: linuxserver/lidarr:latest
@@ -188,6 +224,12 @@ services:
       - ${MEDIA_ROOT}/music:/music
       - ${DOWNLOADS_ROOT}:/downloads
     networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8686/ping || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   readarr:
     image: linuxserver/readarr:develop
@@ -204,6 +246,12 @@ services:
       - ${MEDIA_ROOT}/audiobooks:/audiobooks
       - ${DOWNLOADS_ROOT}:/downloads
     networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8787/ping || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   bazarr:
     image: linuxserver/bazarr:latest
@@ -220,6 +268,12 @@ services:
       - ${MEDIA_ROOT}/tv:/tv
       - ${MEDIA_ROOT}/anime:/anime
     networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:6767 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   whisparr:
     image: ghcr.io/hotio/whisparr:latest
@@ -235,6 +289,12 @@ services:
       - ${MEDIA_ROOT}/adult:/adult
       - ${DOWNLOADS_ROOT}:/downloads
     networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:6969/ping || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # ── Quality & Automation ───────────────────────────────────────────────────
   recyclarr:
@@ -257,6 +317,12 @@ services:
     volumes:
       - ${APPDATA}/autobrr/config:/config
     networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:7474 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   # ── Migration Tool (stop after library import is done) ─────────────────────
   filebot:
@@ -273,6 +339,12 @@ services:
       - ${MEDIA_ROOT}:/storage:rw
       - ${DOWNLOADS_ROOT}:/downloads:rw
     networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5800 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # ── Notifications & Monitoring ─────────────────────────────────────────────
   notifiarr:
@@ -287,6 +359,12 @@ services:
       - ${APPDATA}/notifiarr/config:/config
       - /var/run/utmp:/var/run/utmp
     networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5454 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   homepage:
     image: ghcr.io/gethomepage/homepage:latest
@@ -299,6 +377,31 @@ services:
     volumes:
       - ${APPDATA}/homepage/config:/app/config
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Download Health Monitor ────────────────────────────────────────────────
+  download-monitor:
+    image: alpine:latest
+    container_name: download-monitor
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl jq bash > /dev/null 2>&1 && exec bash /scripts/download-monitor.sh"]
+    environment:
+      - RADARR_API_KEY=${RADARR_API_KEY:-}
+      - SONARR_API_KEY=${SONARR_API_KEY:-}
+      - LIDARR_API_KEY=${LIDARR_API_KEY:-}
+      - READARR_API_KEY=${READARR_API_KEY:-}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      - STALL_THRESHOLD_HOURS=6
+      - CHECK_INTERVAL=3600
+      - TZ=${TZ}
+    volumes:
+      - ../scripts/download-monitor.sh:/scripts/download-monitor.sh:ro
     networks: [arr-net]
 
   # ── Maintenance ────────────────────────────────────────────────────────────
@@ -324,3 +427,9 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

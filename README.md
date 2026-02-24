@@ -75,6 +75,10 @@ All scripts are **re-run safe** — skip already-configured items on re-run.
 - qBittorrent password changed from default
 - Bazarr → Sonarr/Radarr connected, English + forced subs configured
 - Download client passwords synced across all *arr apps
+- **Auto-redownload on failure** enabled (failed download → auto-search for alternative)
+- **Discord notifications** for all *arr apps (grab, import, health issues) — if webhook configured
+- **Download health monitor** — detects and removes stalled torrents, auto-searches replacements
+- Docker healthchecks on all services
 
 ### Spyglass (Plex) — `init-machine1-plex.sh`
 - System packages + Intel iGPU drivers (non-free)
@@ -90,6 +94,8 @@ All scripts are **re-run safe** — skip already-configured items on re-run.
   - Subtitle mode: "Shown with foreign audio" (the forced subs fix)
   - Transcoder: prefer higher speed
   - Transcode temp dir on local SSD
+- **Uptime Kuma** monitoring dashboard
+- Docker healthchecks on all services
 
 ### Remote Deploy (`remote-deploy.sh`)
 - Prerequisites check (ssh, sshpass, rsync)
@@ -119,6 +125,36 @@ Both scripts print a summary. The main items:
 - Tdarr: add libraries, plugins (Migz5ConvertContainer → Migz1FFMPEG → Migz3CleanAudio → Migz4CleanSubs), set Migz4CleanSubs to **KEEP forced subtitle tracks**
 - Overseerr: sign in with Plex (Radarr/Sonarr auto-configured when using setup.sh or remote-deploy.sh)
 - Kometa: auto-triggered when Plex libraries are detected (manual if using direct mode: `docker exec kometa python kometa.py --run`)
+- Tautulli: add Discord webhook for playback notifications
+- Uptime Kuma (http://localhost:3001): create admin account, add monitors for all services
+
+## Monitoring & Notifications
+
+### Discord Notifications
+Provide a Discord webhook URL during setup. One URL covers everything:
+- **\*arr apps** (Radarr, Sonarr, Lidarr, Readarr, Prowlarr): grab started, import complete, upgrades, health issues
+- **Watchtower** (both machines): container image updates (auto-derived shoutrrr format)
+- **Download monitor**: stalled torrent removal alerts
+
+Tautulli Discord notifications require manual setup (30-second config in the Tautulli UI).
+
+### Uptime Kuma
+Dashboard at `http://SPYGLASS_IP:3001`. Manual setup — add monitors pointing to each service's healthcheck endpoint. All services have Docker healthchecks so you can use the Docker container monitor type.
+
+### Download Health Monitor
+Runs on Privateer as a lightweight Alpine container. Checks all *arr queues every hour for stalled torrents (warning status > 6 hours). Removes stalled items with blocklist so *arr auto-searches for alternatives. Combined with `autoRedownloadFailed`, the flow is:
+
+1. Download fails or stalls → monitor removes it + blocklists
+2. *arr automatically searches for alternative release
+3. Discord notification sent
+
+Configure thresholds via environment variables in the compose file (`STALL_THRESHOLD_HOURS`, `CHECK_INTERVAL`).
+
+### Docker Healthchecks
+Every service with a web UI or API has a Docker healthcheck. This enables:
+- `docker ps` shows health status at a glance
+- Uptime Kuma can monitor container health directly
+- Dependent services (qBit/SABnzbd) wait for gluetun to be healthy before starting
 
 ## Re-Running
 
@@ -144,9 +180,10 @@ Useful re-run scenarios:
   │ Kometa (aesthetics)      │            │   └── SABnzbd (masked)      │
   │ Overseerr (requests)     │            │ Prowlarr + FlareSolverr     │
   │ Tautulli (analytics)     │            │ Radarr, Sonarr, Lidarr      │
-  │ Homepage (:3100)         │            │ Readarr, Bazarr, Whisparr   │
-  │ Tailscale (remote)       │            │ Recyclarr, Autobrr, FileBot │
-  └────────┬────────────────┘            │ Unpackerr, Notifiarr        │
+  │ Uptime Kuma (monitoring) │            │ Readarr, Bazarr, Whisparr   │
+  │ Homepage (:3100)         │            │ Recyclarr, Autobrr, FileBot │
+  │ Tailscale (remote)       │            │ Unpackerr, Notifiarr        │
+  └────────┬────────────────┘            │ Download Monitor (health)    │
            │                              │ Homepage (:3101), Dozzle     │
            └──────────────┬──────────────┤ Tailscale (remote)           │
                           │              └──────────┬───────────────────┘
@@ -181,7 +218,8 @@ media-stack-final/
 ├── README.md
 ├── scripts/
 │   ├── init-machine1-plex.sh              ← Spyglass init (called by setup/remote-deploy)
-│   └── init-machine2-arr.sh               ← Privateer init (called by setup/remote-deploy)
+│   ├── init-machine2-arr.sh               ← Privateer init (called by setup/remote-deploy)
+│   └── download-monitor.sh               ← Stall detection + auto-removal (runs in container)
 ├── machine1-plex/
 │   ├── .env.example
 │   ├── docker-compose.yml
@@ -218,6 +256,21 @@ media-stack-final/
 | Download categories | API automated | radarr, sonarr, lidarr, readarr, whisparr |
 | Readarr root folders | API automated | /books, /audiobooks |
 | Whisparr root folder | API automated | /adult |
+| Auto-redownload | API automated | Failed downloads trigger automatic re-search |
+| Discord notifications | API automated | All *arr apps → grab, import, health events |
+| Stall detection | download-monitor | 6h threshold, 1h check interval |
+| Watchtower notifications | .env derived | Auto-converted from Discord webhook to shoutrrr |
+
+## Configuration Variables
+
+| Variable | Where | Description |
+|----------|-------|-------------|
+| `DISCORD_WEBHOOK_URL` | Both .env files | Discord webhook for all notifications (optional) |
+| `WATCHTOWER_NOTIFICATION_URL` | Both .env files | Auto-derived from Discord webhook (shoutrrr format) |
+| `STALL_THRESHOLD_HOURS` | Privateer compose | Hours before stalled torrent is removed (default: 6) |
+| `CHECK_INTERVAL` | Privateer compose | Seconds between download health checks (default: 3600) |
+
+All *arr API keys are auto-populated by the init script. See `.env.example` files for the complete list.
 
 ## Security
 
