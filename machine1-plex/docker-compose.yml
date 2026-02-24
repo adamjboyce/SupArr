@@ -201,3 +201,23 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
+  # ── Config Backup ─────────────────────────────────────────────────────────
+  backup-spyglass:
+    image: alpine:latest
+    container_name: backup-spyglass
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl bash > /dev/null 2>&1 && exec bash /scripts/backup.sh"]
+    environment:
+      - APPDATA=/data
+      - BACKUP_DIR=/backups
+      - BACKUP_RETENTION_DAYS=7
+      - BACKUP_INTERVAL=604800
+      - MACHINE_NAME=spyglass
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      - TZ=${TZ}
+    volumes:
+      - ../scripts/backup.sh:/scripts/backup.sh:ro
+      - ${APPDATA}:/data:ro
+      - ${APPDATA}/backups:/backups
+    networks: [media-net]

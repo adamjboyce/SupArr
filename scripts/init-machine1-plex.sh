@@ -52,9 +52,56 @@ NAS_IP="${NAS_IP:-}"
 NAS_MEDIA_EXPORT="${NAS_MEDIA_EXPORT:-/volume1/media}"
 REAL_USER="${SUDO_USER:-$USER}"
 
+# ── OS Portability ─────────────────────────────────────────────────────────
+detect_pkg_manager() {
+    if command -v apt-get &>/dev/null; then echo "apt"
+    elif command -v dnf &>/dev/null; then echo "dnf"
+    elif command -v pacman &>/dev/null; then echo "pacman"
+    else echo "unknown"; fi
+}
+
+pkg_install() {
+    local mgr="$1"; shift
+    case "$mgr" in
+        apt)    apt-get install -y -qq "$@" ;;
+        dnf)    dnf install -y -q "$@" ;;
+        pacman) pacman -S --noconfirm --needed "$@" ;;
+        *)      err "Unsupported package manager"; exit 1 ;;
+    esac
+}
+
+pkg_update() {
+    case "$1" in
+        apt)    apt-get update -qq && apt-get upgrade -y -qq ;;
+        dnf)    dnf upgrade -y -q ;;
+        pacman) pacman -Syu --noconfirm ;;
+    esac
+}
+
+pkg_name() {
+    local mgr="$1" pkg="$2"
+    case "$mgr:$pkg" in
+        pacman:nfs-common)                  echo "nfs-utils" ;;
+        dnf:nfs-common)                     echo "nfs-utils" ;;
+        pacman:lsb-release)                 echo "lsb-release" ;;
+        dnf:lsb-release)                    echo "redhat-lsb-core" ;;
+        pacman:apt-transport-https)         echo "" ;;
+        dnf:apt-transport-https)            echo "" ;;
+        pacman:software-properties-common)  echo "" ;;
+        dnf:software-properties-common)     echo "" ;;
+        pacman:gnupg)                       echo "gnupg" ;;
+        pacman:ca-certificates)             echo "ca-certificates" ;;
+        *)                                  echo "$pkg" ;;
+    esac
+}
+
+PKG_MGR=$(detect_pkg_manager)
+
 # ===========================================================================
 header "Phase 1: System Packages + Intel iGPU Drivers"
 # ===========================================================================
+
+log "Detected package manager: $PKG_MGR"
 
 # Set machine hostname (idempotent)
 if [ "$(hostname | tr '[:upper:]' '[:lower:]')" != "spyglass" ]; then
@@ -65,23 +112,34 @@ else
 fi
 
 info "Updating system..."
-apt-get update -qq && apt-get upgrade -y -qq
+pkg_update "$PKG_MGR"
 
-# Add non-free firmware repo for Intel media driver
-if ! grep -q "non-free" /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null; then
-    info "Enabling non-free repos for Intel drivers..."
-    sed -i 's/bookworm main$/bookworm main contrib non-free non-free-firmware/' /etc/apt/sources.list
-    apt-get update -qq
+# Build base package list with distro-appropriate names
+BASE_PKGS=""
+for pkg in curl git wget jq nfs-common htop iotop ca-certificates gnupg lsb-release apt-transport-https software-properties-common; do
+    mapped=$(pkg_name "$PKG_MGR" "$pkg")
+    [ -n "$mapped" ] && BASE_PKGS="$BASE_PKGS $mapped"
+done
+
+info "Installing dependencies..."
+# shellcheck disable=SC2086
+pkg_install "$PKG_MGR" $BASE_PKGS
+
+# Intel iGPU drivers (distro-specific)
+info "Installing Intel GPU drivers..."
+if [ "$PKG_MGR" = "apt" ]; then
+    # Add non-free firmware repo for Intel media driver
+    if ! grep -q "non-free" /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null; then
+        info "Enabling non-free repos for Intel drivers..."
+        sed -i 's/bookworm main$/bookworm main contrib non-free non-free-firmware/' /etc/apt/sources.list
+        apt-get update -qq
+    fi
+    pkg_install "$PKG_MGR" intel-media-va-driver-non-free intel-gpu-tools vainfo
+elif [ "$PKG_MGR" = "dnf" ]; then
+    pkg_install "$PKG_MGR" intel-media-driver intel-gpu-tools libva-utils
+elif [ "$PKG_MGR" = "pacman" ]; then
+    pkg_install "$PKG_MGR" intel-media-driver intel-gpu-tools libva-utils
 fi
-
-info "Installing dependencies + Intel GPU drivers..."
-apt-get install -y -qq \
-    curl git wget jq nfs-common htop iotop \
-    ca-certificates gnupg lsb-release \
-    apt-transport-https software-properties-common \
-    intel-media-va-driver-non-free \
-    intel-gpu-tools \
-    vainfo
 
 log "System packages installed"
 
@@ -123,6 +181,7 @@ info "Creating app data directories..."
 mkdir -p "$APPDATA"/{plex/{config,transcode},tdarr/{server,configs,logs,transcode_cache}}
 mkdir -p "$APPDATA"/{kometa/config,overseerr/config,tautulli/config}
 mkdir -p "$APPDATA"/{homepage/config,tailscale/state,uptime-kuma/data}
+mkdir -p "$APPDATA"/backups
 
 if [ "$REAL_USER" != "root" ]; then
     chown -R "$REAL_USER":"$REAL_USER" "$APPDATA"
@@ -176,6 +235,15 @@ if [ -f "$KOMETA_CONF" ]; then
     [ -n "${TRAKT_CLIENT_ID:-}" ] && sed -i "s/YOUR_TRAKT_ID/${TRAKT_CLIENT_ID}/g" "$KOMETA_CONF"
     [ -n "${TRAKT_CLIENT_SECRET:-}" ] && sed -i "s/YOUR_TRAKT_SECRET/${TRAKT_CLIENT_SECRET}/g" "$KOMETA_CONF"
     sed -i "s|http://PLEX_SERVER_IP:32400|http://${PLEX_IP}:32400|g" "$KOMETA_CONF"
+    # Trakt OAuth tokens (populated by trakt_device_auth in setup.sh)
+    if [ -n "${TRAKT_ACCESS_TOKEN:-}" ]; then
+        sed -i "s|^    access_token:.*|    access_token: ${TRAKT_ACCESS_TOKEN}|" "$KOMETA_CONF"
+        sed -i "s|^    refresh_token:.*|    refresh_token: ${TRAKT_REFRESH_TOKEN:-}|" "$KOMETA_CONF"
+        sed -i "s|^    expires_in:.*|    expires_in: ${TRAKT_EXPIRES:-}|" "$KOMETA_CONF"
+        sed -i "s|^    created_at:.*|    created_at: ${TRAKT_CREATED_AT:-}|" "$KOMETA_CONF"
+        sed -i "s|^    token_type:.*|    token_type: Bearer|" "$KOMETA_CONF"
+        sed -i "s|^    scope:.*|    scope: public|" "$KOMETA_CONF"
+    fi
     log "Kometa credentials substituted"
 fi
 
@@ -287,6 +355,7 @@ echo "  │  ✓ Plex: transcoder speed optimized                │"
 echo "  │  ✓ Plex: transcode temp on local SSD               │"
 echo "  │  ✓ Uptime Kuma monitoring dashboard                │"
 echo "  │  ✓ Docker healthchecks on all services             │"
+echo "  │  ✓ Config backup automation (weekly + rotation)    │"
 echo "  └─────────────────────────────────────────────────────┘"
 echo ""
 warn "STILL NEEDS MANUAL SETUP:"

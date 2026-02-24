@@ -78,6 +78,11 @@ All scripts are **re-run safe** — skip already-configured items on re-run.
 - **Auto-redownload on failure** enabled (failed download → auto-search for alternative)
 - **Discord notifications** for all *arr apps (grab, import, health issues) — if webhook configured
 - **Download health monitor** — detects and removes stalled torrents, auto-searches replacements
+- **Import lists** — Trakt Popular/Trending + TMDb Popular auto-configured for Radarr/Sonarr (if tokens provided)
+- **Plex Connect** — library scan notification on import for Radarr/Sonarr/Lidarr/Readarr (if Plex token provided)
+- **Config backup** — weekly tar+gzip with 7-day rotation + Discord notification
+- **Maintenance robot** — daily disk space alerts, stale download cleanup, empty directory cleanup
+- **Weekly digest** — summarizes recently imported content to Discord
 - Docker healthchecks on all services
 
 ### Spyglass (Plex) — `init-machine1-plex.sh`
@@ -86,8 +91,10 @@ All scripts are **re-run safe** — skip already-configured items on re-run.
 - iGPU verification (/dev/dri/renderD128)
 - Docker installation
 - NFS mount to NAS
-- Kometa config deployed with API keys from .env (keys always substituted)
+- Kometa config deployed with API keys + Trakt OAuth tokens from .env
+- Kometa enhanced: content_rating, country, franchise, based collections; Anime + Music libraries
 - Homepage dashboard template deployed
+- **Config backup** — weekly tar+gzip with 7-day rotation + Discord notification
 - All containers started (with `--remove-orphans`)
 - **Plex preferences patched:**
   - Hardware transcoding enabled (Quick Sync)
@@ -108,6 +115,8 @@ All scripts are **re-run safe** — skip already-configured items on re-run.
 - Two-machine: launches init scripts **in parallel**
 - Single-machine: runs init scripts **sequentially**
 - Post-deploy summary with all service URLs and cross-machine config hints
+- **Trakt device auth** — interactive OAuth flow during setup, tokens propagated to Kometa + import lists
+- **Overseerr Plex Watchlist** sync auto-enabled
 - **Post-deploy polling:** waits for Overseerr setup wizard + Plex libraries, then auto-configures Overseerr → Radarr/Sonarr and triggers Kometa first run
 
 ## Manual Finishing Touches
@@ -156,6 +165,75 @@ Every service with a web UI or API has a Docker healthcheck. This enables:
 - Uptime Kuma can monitor container health directly
 - Dependent services (qBit/SABnzbd) wait for gluetun to be healthy before starting
 
+## Content Discovery
+
+Content finds you — no more manual searching.
+
+### Trakt Import Lists
+During setup, provide your Trakt client ID + secret. The setup script runs an interactive **device auth flow** — you visit a URL, enter a code, and tokens are auto-populated everywhere they're needed (Kometa config, import lists).
+
+Radarr and Sonarr get auto-configured import lists:
+- **Trakt Popular** — top 100 popular movies/shows
+- **Trakt Trending** — top 50 currently trending
+- **TMDb Popular** — TMDb's popular list (if TMDb API key provided)
+
+All import lists auto-search on add, so new trending content gets grabbed automatically.
+
+### Plex Watchlist via Overseerr
+Overseerr's Plex Watchlist sync is auto-enabled. Add something to your Plex Watchlist from any device → Overseerr picks it up → sends to Radarr/Sonarr → downloads automatically.
+
+### Plex Connect (Library Scan on Import)
+When *arr apps finish importing content, they notify Plex to scan the library immediately. No more waiting for scheduled scans — new content appears in Plex within seconds of import completing. Configured for Radarr, Sonarr, Lidarr, and Readarr.
+
+## Kometa — Library Aesthetics
+
+Kometa makes your Plex look like a real streaming service with auto-generated collections and poster overlays.
+
+**Movies** — collections: basic, IMDb, TMDb, Trakt, universe (MCU, Star Wars, etc.), studio, seasonal, award, decade, genre, resolution, audio language, subtitle language, content rating, country, franchise, based on. Overlays: resolution, audio codec, video format, ratings, streaming availability.
+
+**TV Shows** — collections: basic, TMDb, Trakt, network, genre, resolution, content rating, country, based on. Overlays: resolution, audio codec, video format, ratings, streaming, status (returning/ended/canceled).
+
+**Anime** — collections: basic, MyAnimeList, genre. Overlays: resolution, ratings, streaming. Mass rating from MAL.
+
+**Music** — collections: genre.
+
+Trakt OAuth tokens are pre-populated via the device auth flow, so Kometa has full Trakt access from first run.
+
+## Maintenance Automation
+
+### Config Backup
+Both machines run a weekly backup container that tar+gzips the entire APPDATA directory, keeps 7 days of backups, and sends Discord notifications. Backups stored at `${APPDATA}/backups/`.
+
+### Maintenance Robot (Privateer)
+Daily maintenance cycle:
+1. **Disk space monitoring** — alerts Discord when any mount exceeds 85% usage
+2. **Stale download cleanup** — removes incomplete downloads older than 7 days (`.!qB` for qBit, `.nzb.tmp` for SABnzbd)
+3. **Empty directory cleanup** — removes empty media subdirectories left behind after *arr removes content
+
+### Weekly Content Digest
+Queries *arr history APIs every 7 days and sends a formatted Discord summary of recently imported movies, TV shows, and music albums.
+
+## 40TB Library Import
+
+FileBot container is deployed on Privateer for large library imports:
+- **FileBot UI**: `http://localhost:5800`
+- Point FileBot at your existing library → rename/organize into the correct folder structure
+- *arr apps detect new content via library scan
+- Hardlinks work because downloads and media are on the same NFS filesystem
+- For very large imports, use FileBot to organize first, then trigger a manual *arr library scan
+
+## OS Compatibility
+
+Init scripts auto-detect the package manager and install distro-appropriate packages.
+
+| Distro | Package Manager | Status |
+|--------|----------------|--------|
+| Debian 12 / Ubuntu 22+ | apt | Fully tested |
+| Fedora / RHEL 9+ | dnf | Supported |
+| Arch Linux | pacman | Supported |
+
+Docker installation uses `get.docker.com` which works across all supported distros. Intel iGPU driver packages are mapped per-distro (Spyglass only).
+
 ## Re-Running
 
 All scripts are **idempotent** — safe to re-run at any time:
@@ -183,7 +261,8 @@ Useful re-run scenarios:
   │ Uptime Kuma (monitoring) │            │ Readarr, Bazarr, Whisparr   │
   │ Homepage (:3100)         │            │ Recyclarr, Autobrr, FileBot │
   │ Tailscale (remote)       │            │ Unpackerr, Notifiarr        │
-  └────────┬────────────────┘            │ Download Monitor (health)    │
+  │ Backup (weekly)          │            │ Download Monitor (health)    │
+  └────────┬────────────────┘            │ Backup, Maintenance, Digest  │
            │                              │ Homepage (:3101), Dozzle     │
            └──────────────┬──────────────┤ Tailscale (remote)           │
                           │              └──────────┬───────────────────┘
@@ -219,16 +298,19 @@ media-stack-final/
 ├── scripts/
 │   ├── init-machine1-plex.sh              ← Spyglass init (called by setup/remote-deploy)
 │   ├── init-machine2-arr.sh               ← Privateer init (called by setup/remote-deploy)
-│   └── download-monitor.sh               ← Stall detection + auto-removal (runs in container)
+│   ├── download-monitor.sh               ← Stall detection + auto-removal (runs in container)
+│   ├── backup.sh                          ← Config backup with rotation (runs in container)
+│   ├── maintenance.sh                     ← Disk monitoring + cleanup (runs in container)
+│   └── weekly-digest.sh                   ← Weekly content summary (runs in container)
 ├── machine1-plex/
 │   ├── .env.example
-│   ├── docker-compose.yml
+│   ├── docker-compose.yml                 ← +backup-spyglass container
 │   └── config-templates/
-│       ├── kometa.yml
+│       ├── kometa.yml                     ← Movies, TV, Anime, Music libraries
 │       └── homepage-services.yaml
 └── machine2-arr/
     ├── .env.example
-    ├── docker-compose.yml
+    ├── docker-compose.yml                 ← +backup-privateer, maintenance, weekly-digest
     ├── config-seeds/
     │   └── qbittorrent/
     │       └── qBittorrent.conf
@@ -260,6 +342,14 @@ media-stack-final/
 | Discord notifications | API automated | All *arr apps → grab, import, health events |
 | Stall detection | download-monitor | 6h threshold, 1h check interval |
 | Watchtower notifications | .env derived | Auto-converted from Discord webhook to shoutrrr |
+| Trakt import lists | API automated | Popular (100) + Trending (50) for Radarr/Sonarr |
+| TMDb import lists | API automated | TMDb Popular for Radarr/Sonarr |
+| Plex Connect | API automated | Library scan on import for all *arr apps |
+| Overseerr Watchlist | API automated | Plex Watchlist sync enabled |
+| Config backup | backup container | Weekly, 7-day retention |
+| Disk monitoring | maintenance container | Alert at 85% usage, daily check |
+| Stale download cleanup | maintenance container | Remove incomplete >7 days |
+| Weekly digest | weekly-digest container | Discord summary every 7 days |
 
 ## Configuration Variables
 
@@ -267,8 +357,18 @@ media-stack-final/
 |----------|-------|-------------|
 | `DISCORD_WEBHOOK_URL` | Both .env files | Discord webhook for all notifications (optional) |
 | `WATCHTOWER_NOTIFICATION_URL` | Both .env files | Auto-derived from Discord webhook (shoutrrr format) |
+| `TRAKT_CLIENT_ID` | Plex .env | Trakt OAuth app client ID (for Kometa + import lists) |
+| `TRAKT_CLIENT_SECRET` | Plex .env | Trakt OAuth app client secret |
+| `TRAKT_ACCESS_TOKEN` | Both .env files | Auto-populated by device auth flow in setup.sh |
+| `TRAKT_REFRESH_TOKEN` | Plex .env | Auto-populated by device auth flow |
+| `PLEX_TOKEN` | Both .env files | Plex auth token (for Kometa + Plex Connect notifications) |
+| `PLEX_IP` | Both .env files | Plex server IP (for Kometa + Plex Connect) |
+| `TMDB_API_KEY` | Both .env files | TMDb API key (for Kometa + import lists) |
 | `STALL_THRESHOLD_HOURS` | Privateer compose | Hours before stalled torrent is removed (default: 6) |
 | `CHECK_INTERVAL` | Privateer compose | Seconds between download health checks (default: 3600) |
+| `DISK_ALERT_THRESHOLD` | Privateer compose | Disk usage % to trigger alert (default: 85) |
+| `BACKUP_RETENTION_DAYS` | Both compose files | Days to keep config backups (default: 7) |
+| `BACKUP_INTERVAL` | Both compose files | Seconds between backups (default: 604800 = 7 days) |
 
 All *arr API keys are auto-populated by the init script. See `.env.example` files for the complete list.
 

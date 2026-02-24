@@ -76,6 +76,61 @@ ask_yn() {
 }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# ── Trakt Device Auth Flow ────────────────────────────────────────────────
+trakt_device_auth() {
+    local client_id="$1" client_secret="$2"
+
+    info "Starting Trakt device authorization..."
+    local device_response
+    device_response=$(curl -sf -X POST "https://api.trakt.tv/oauth/device/code" \
+        -H "Content-Type: application/json" \
+        -d "{\"client_id\": \"${client_id}\"}")
+
+    if [ -z "$device_response" ]; then
+        warn "Could not reach Trakt API — skipping device auth"
+        return 1
+    fi
+
+    local user_code device_code verification_url expires_in interval
+    user_code=$(echo "$device_response" | jq -r '.user_code')
+    device_code=$(echo "$device_response" | jq -r '.device_code')
+    verification_url=$(echo "$device_response" | jq -r '.verification_url')
+    expires_in=$(echo "$device_response" | jq -r '.expires_in')
+    interval=$(echo "$device_response" | jq -r '.interval')
+
+    echo ""
+    echo "  ┌──────────────────────────────────────────────┐"
+    echo "  │  Go to: ${verification_url}"
+    echo "  │  Enter code: ${user_code}"
+    echo "  │  Expires in: $((expires_in / 60)) minutes"
+    echo "  └──────────────────────────────────────────────┘"
+    echo ""
+
+    local elapsed=0
+    while [ "$elapsed" -lt "$expires_in" ]; do
+        sleep "$interval"
+        elapsed=$((elapsed + interval))
+
+        local token_response
+        token_response=$(curl -sf -X POST "https://api.trakt.tv/oauth/device/token" \
+            -H "Content-Type: application/json" \
+            -d "{\"code\": \"${device_code}\", \"client_id\": \"${client_id}\", \"client_secret\": \"${client_secret}\"}" 2>/dev/null || echo "")
+
+        if echo "$token_response" | jq -e '.access_token' &>/dev/null; then
+            TRAKT_ACCESS_TOKEN=$(echo "$token_response" | jq -r '.access_token')
+            TRAKT_REFRESH_TOKEN=$(echo "$token_response" | jq -r '.refresh_token')
+            TRAKT_EXPIRES=$(echo "$token_response" | jq -r '.expires_in')
+            TRAKT_CREATED_AT=$(echo "$token_response" | jq -r '.created_at')
+            log "Trakt authorized successfully!"
+            return 0
+        fi
+    done
+
+    warn "Trakt authorization timed out — you can set tokens manually later"
+    return 1
+}
+
 REMOTE_PROJECT_PATH="/opt/suparr"
 SSH_KEY="$HOME/.ssh/suparr_deploy_key"
 
@@ -223,6 +278,20 @@ ask TRAKT_CLIENT_SECRET "Trakt client secret" "skip"
 [ "$TRAKT_CLIENT_ID" = "skip" ] && TRAKT_CLIENT_ID=""
 [ "$TRAKT_CLIENT_SECRET" = "skip" ] && TRAKT_CLIENT_SECRET=""
 
+# ── Trakt Device Auth ────────────────────────────────────────────────────
+TRAKT_ACCESS_TOKEN="${TRAKT_ACCESS_TOKEN:-}"
+TRAKT_REFRESH_TOKEN="${TRAKT_REFRESH_TOKEN:-}"
+TRAKT_EXPIRES="${TRAKT_EXPIRES:-}"
+TRAKT_CREATED_AT="${TRAKT_CREATED_AT:-}"
+
+if [ -n "${TRAKT_CLIENT_ID:-}" ] && [ -n "${TRAKT_CLIENT_SECRET:-}" ] && [ -z "${TRAKT_ACCESS_TOKEN:-}" ]; then
+    if command -v jq &>/dev/null; then
+        trakt_device_auth "$TRAKT_CLIENT_ID" "$TRAKT_CLIENT_SECRET" || true
+    else
+        warn "jq not installed — skipping Trakt device auth (set tokens manually)"
+    fi
+fi
+
 # ── Arr-specific ──
 echo ""
 echo -e "  ${BOLD}Privateer (*arr) settings:${NC}\n"
@@ -366,6 +435,10 @@ TMDB_API_KEY=${TMDB_API_KEY}
 MDBLIST_API_KEY=${MDBLIST_API_KEY}
 TRAKT_CLIENT_ID=${TRAKT_CLIENT_ID}
 TRAKT_CLIENT_SECRET=${TRAKT_CLIENT_SECRET}
+TRAKT_ACCESS_TOKEN=${TRAKT_ACCESS_TOKEN}
+TRAKT_REFRESH_TOKEN=${TRAKT_REFRESH_TOKEN}
+TRAKT_EXPIRES=${TRAKT_EXPIRES}
+TRAKT_CREATED_AT=${TRAKT_CREATED_AT}
 DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
 WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL}
 ENVEOF
@@ -401,6 +474,10 @@ READARR_API_KEY=
 WHISPARR_API_KEY=
 SABNZBD_API_KEY=
 NOTIFIARR_API_KEY=${NOTIFIARR_API_KEY}
+TRAKT_ACCESS_TOKEN=${TRAKT_ACCESS_TOKEN}
+PLEX_TOKEN=${PLEX_TOKEN}
+PLEX_IP=${PLEX_IP_FOR_KOMETA}
+TMDB_API_KEY=${TMDB_API_KEY}
 DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
 WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL}
 ENVEOF
@@ -647,6 +724,13 @@ configure_overseerr_remote() {
             log "  Overseerr → Sonarr already configured"
         fi
     fi
+
+    # --- Plex Watchlist sync ---
+    curl -sf -X POST "${os_url}/settings/plex" \
+        -H "X-Api-Key: ${os_key}" \
+        -H "Content-Type: application/json" \
+        -d '{"watchlistSync": true}' > /dev/null 2>&1 && \
+        log "  Overseerr: Plex Watchlist sync enabled" || true
 }
 
 PLEX_LOG=$(mktemp)

@@ -59,9 +59,56 @@ NAS_IP="${NAS_IP:-}"
 NAS_MEDIA_EXPORT="${NAS_MEDIA_EXPORT:-/volume1/media}"
 NAS_DOWNLOADS_EXPORT="${NAS_DOWNLOADS_EXPORT:-/volume1/downloads}"
 
+# ── OS Portability ─────────────────────────────────────────────────────────
+detect_pkg_manager() {
+    if command -v apt-get &>/dev/null; then echo "apt"
+    elif command -v dnf &>/dev/null; then echo "dnf"
+    elif command -v pacman &>/dev/null; then echo "pacman"
+    else echo "unknown"; fi
+}
+
+pkg_install() {
+    local mgr="$1"; shift
+    case "$mgr" in
+        apt)    apt-get install -y -qq "$@" ;;
+        dnf)    dnf install -y -q "$@" ;;
+        pacman) pacman -S --noconfirm --needed "$@" ;;
+        *)      err "Unsupported package manager"; exit 1 ;;
+    esac
+}
+
+pkg_update() {
+    case "$1" in
+        apt)    apt-get update -qq && apt-get upgrade -y -qq ;;
+        dnf)    dnf upgrade -y -q ;;
+        pacman) pacman -Syu --noconfirm ;;
+    esac
+}
+
+pkg_name() {
+    local mgr="$1" pkg="$2"
+    case "$mgr:$pkg" in
+        pacman:nfs-common)                  echo "nfs-utils" ;;
+        dnf:nfs-common)                     echo "nfs-utils" ;;
+        pacman:lsb-release)                 echo "lsb-release" ;;
+        dnf:lsb-release)                    echo "redhat-lsb-core" ;;
+        pacman:apt-transport-https)         echo "" ;;
+        dnf:apt-transport-https)            echo "" ;;
+        pacman:software-properties-common)  echo "" ;;
+        dnf:software-properties-common)     echo "" ;;
+        pacman:gnupg)                       echo "gnupg" ;;
+        pacman:ca-certificates)             echo "ca-certificates" ;;
+        *)                                  echo "$pkg" ;;
+    esac
+}
+
+PKG_MGR=$(detect_pkg_manager)
+
 # ===========================================================================
 header "Phase 1: System Packages"
 # ===========================================================================
+
+log "Detected package manager: $PKG_MGR"
 
 # Set machine hostname (idempotent)
 if [ "$(hostname | tr '[:upper:]' '[:lower:]')" != "privateer" ]; then
@@ -72,13 +119,18 @@ else
 fi
 
 info "Updating system..."
-apt-get update -qq && apt-get upgrade -y -qq
+pkg_update "$PKG_MGR"
+
+# Build base package list with distro-appropriate names
+BASE_PKGS=""
+for pkg in curl git wget jq nfs-common htop iotop ca-certificates gnupg lsb-release apt-transport-https software-properties-common; do
+    mapped=$(pkg_name "$PKG_MGR" "$pkg")
+    [ -n "$mapped" ] && BASE_PKGS="$BASE_PKGS $mapped"
+done
 
 info "Installing dependencies..."
-apt-get install -y -qq \
-    curl git wget jq nfs-common htop iotop \
-    ca-certificates gnupg lsb-release \
-    apt-transport-https software-properties-common
+# shellcheck disable=SC2086
+pkg_install "$PKG_MGR" $BASE_PKGS
 
 log "System packages installed"
 
@@ -112,6 +164,7 @@ mkdir -p "$APPDATA"/{bazarr/config,recyclarr/config,autobrr/config}
 mkdir -p "$APPDATA"/{unpackerr,notifiarr/config,homepage/config}
 mkdir -p "$APPDATA"/{whisparr/config,filebot/config,tailscale/state}
 mkdir -p "$APPDATA"/dozzle
+mkdir -p "$APPDATA"/backups
 
 # Set ownership to real user
 if [ "$REAL_USER" != "root" ]; then
@@ -880,6 +933,127 @@ if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
 fi
 
 # ===========================================================================
+header "Phase 8d: Import Lists + Plex Connect"
+# ===========================================================================
+
+# Helper: add import list to *arr app (idempotent by name)
+add_import_list() {
+    local name="$1" host="$2" port="$3" api_ver="$4" api_key="$5"
+    local list_name="$6" implementation="$7" config_contract="$8"
+    local root_folder="$9" fields_json="${10}"
+
+    if [ -z "$api_key" ]; then return; fi
+    local url="http://${host}:${port}/api/${api_ver}/importlist"
+
+    # Check if list already exists by name
+    local existing
+    existing=$(arr_api "$url" "$api_key" 2>/dev/null | \
+        jq -r --arg n "$list_name" '[.[] | select(.name==$n)] | length' 2>/dev/null || echo "0")
+    if [ "${existing:-0}" -gt 0 ]; then
+        log "  ${name}: import list '${list_name}' already exists"
+        return
+    fi
+
+    arr_api "$url" "$api_key" POST "{
+        \"name\": \"${list_name}\",
+        \"implementation\": \"${implementation}\",
+        \"configContract\": \"${config_contract}\",
+        \"enableAuto\": true,
+        \"enabled\": true,
+        \"searchOnAdd\": true,
+        \"shouldMonitor\": true,
+        \"qualityProfileId\": 1,
+        \"rootFolderPath\": \"${root_folder}\",
+        \"fields\": ${fields_json}
+    }" > /dev/null 2>&1 && \
+        log "  ${name}: import list '${list_name}' added" || \
+        warn "  ${name}: could not add import list '${list_name}'"
+}
+
+# --- Radarr import lists ---
+if [ -n "${RADARR_API_KEY:-}" ]; then
+    info "Adding Radarr import lists..."
+
+    if [ -n "${TRAKT_ACCESS_TOKEN:-}" ]; then
+        add_import_list "Radarr" "$ARR_HOST" 7878 "v3" "$RADARR_API_KEY" \
+            "Trakt Popular" "TraktPopularImport" "TraktPopularSettings" "/movies" \
+            "[{\"name\":\"accessToken\",\"value\":\"${TRAKT_ACCESS_TOKEN}\"},{\"name\":\"limit\",\"value\":100},{\"name\":\"traktListType\",\"value\":0}]"
+
+        add_import_list "Radarr" "$ARR_HOST" 7878 "v3" "$RADARR_API_KEY" \
+            "Trakt Trending" "TraktPopularImport" "TraktPopularSettings" "/movies" \
+            "[{\"name\":\"accessToken\",\"value\":\"${TRAKT_ACCESS_TOKEN}\"},{\"name\":\"limit\",\"value\":50},{\"name\":\"traktListType\",\"value\":1}]"
+    fi
+
+    if [ -n "${TMDB_API_KEY:-}" ]; then
+        add_import_list "Radarr" "$ARR_HOST" 7878 "v3" "$RADARR_API_KEY" \
+            "TMDb Popular" "TMDbPopularImport" "TMDbPopularSettings" "/movies" \
+            "[{\"name\":\"tmdbCertification\",\"value\":\"\"},{\"name\":\"includeGenreIds\",\"value\":\"\"},{\"name\":\"excludeGenreIds\",\"value\":\"\"},{\"name\":\"languageCode\",\"value\":0}]"
+    fi
+fi
+
+# --- Sonarr import lists ---
+if [ -n "${SONARR_API_KEY:-}" ]; then
+    info "Adding Sonarr import lists..."
+
+    if [ -n "${TRAKT_ACCESS_TOKEN:-}" ]; then
+        add_import_list "Sonarr" "$ARR_HOST" 8989 "v3" "$SONARR_API_KEY" \
+            "Trakt Popular" "TraktPopularImport" "TraktPopularSettings" "/tv" \
+            "[{\"name\":\"accessToken\",\"value\":\"${TRAKT_ACCESS_TOKEN}\"},{\"name\":\"limit\",\"value\":100},{\"name\":\"traktListType\",\"value\":0}]"
+
+        add_import_list "Sonarr" "$ARR_HOST" 8989 "v3" "$SONARR_API_KEY" \
+            "Trakt Trending" "TraktPopularImport" "TraktPopularSettings" "/tv" \
+            "[{\"name\":\"accessToken\",\"value\":\"${TRAKT_ACCESS_TOKEN}\"},{\"name\":\"limit\",\"value\":50},{\"name\":\"traktListType\",\"value\":1}]"
+    fi
+
+    if [ -n "${TMDB_API_KEY:-}" ]; then
+        add_import_list "Sonarr" "$ARR_HOST" 8989 "v3" "$SONARR_API_KEY" \
+            "TMDb Popular" "TMDbPopularImport" "TMDbPopularSettings" "/tv" \
+            "[{\"name\":\"languageCode\",\"value\":0}]"
+    fi
+fi
+
+# --- Plex library scan notifications ---
+add_plex_notification() {
+    local name="$1" host="$2" port="$3" api_ver="$4" api_key="$5"
+    if [ -z "$api_key" ] || [ -z "${PLEX_TOKEN:-}" ]; then return; fi
+    local url="http://${host}:${port}/api/${api_ver}/notification"
+
+    local existing
+    existing=$(arr_api "$url" "$api_key" 2>/dev/null | \
+        jq '[.[] | select(.implementation=="PlexServer")] | length' 2>/dev/null || echo "0")
+    if [ "${existing:-0}" -gt 0 ]; then
+        log "  ${name}: Plex notification already configured"
+        return
+    fi
+
+    arr_api "$url" "$api_key" POST "{
+        \"name\": \"Plex\",
+        \"implementation\": \"PlexServer\",
+        \"configContract\": \"PlexServerSettings\",
+        \"fields\": [
+            {\"name\": \"host\", \"value\": \"${PLEX_IP:-}\"},
+            {\"name\": \"port\", \"value\": 32400},
+            {\"name\": \"authToken\", \"value\": \"${PLEX_TOKEN}\"},
+            {\"name\": \"useSsl\", \"value\": false},
+            {\"name\": \"updateLibrary\", \"value\": true}
+        ],
+        \"onDownload\": true,
+        \"onUpgrade\": true,
+        \"onRename\": true
+    }" > /dev/null 2>&1 && \
+        log "  ${name}: Plex library scan on import enabled" || \
+        warn "  ${name}: could not add Plex notification"
+}
+
+if [ -n "${PLEX_TOKEN:-}" ] && [ -n "${PLEX_IP:-}" ]; then
+    info "Configuring Plex library scan notifications..."
+    add_plex_notification "Radarr"  "$ARR_HOST" 7878 "v3" "${RADARR_API_KEY:-}"
+    add_plex_notification "Sonarr"  "$ARR_HOST" 8989 "v3" "${SONARR_API_KEY:-}"
+    add_plex_notification "Lidarr"  "$ARR_HOST" 8686 "v1" "${LIDARR_API_KEY:-}"
+    add_plex_notification "Readarr" "$ARR_HOST" 8787 "v1" "${READARR_API_KEY:-}"
+fi
+
+# ===========================================================================
 header "Phase 9: Summary"
 # ===========================================================================
 
@@ -910,6 +1084,11 @@ echo "  │  ✓ Auto-redownload on failure enabled              │"
 echo "  │  ✓ Discord notifications configured (if webhook)   │"
 echo "  │  ✓ Download health monitoring active               │"
 echo "  │  ✓ Docker healthchecks on all services             │"
+echo "  │  ✓ Import lists: Trakt + TMDb (if tokens set)     │"
+echo "  │  ✓ Plex library scan on import (if Plex token)    │"
+echo "  │  ✓ Config backup automation (weekly + rotation)    │"
+echo "  │  ✓ Maintenance automation (disk, stale, cleanup)  │"
+echo "  │  ✓ Weekly content digest to Discord               │"
 echo "  └─────────────────────────────────────────────────────┘"
 echo ""
 warn "STILL NEEDS MANUAL SETUP:"
