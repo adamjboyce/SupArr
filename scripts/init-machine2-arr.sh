@@ -1058,11 +1058,12 @@ if [ -n "${BOOKSHELF_API_KEY:-}" ]; then
     info "Configuring Bookshelf..."
     if wait_for_api "Bookshelf" "http://${ARR_HOST}:8787/api/v1/system/status?apikey=${BOOKSHELF_API_KEY}"; then
 
-        for folder in books audiobooks; do
+        for folder_info in "books:Books" "audiobooks:Audiobooks"; do
+            IFS=":" read -r folder fname <<< "$folder_info"
             existing=$(arr_api "http://${ARR_HOST}:8787/api/v1/rootfolder" "$BOOKSHELF_API_KEY" | grep -c "/${folder}" || true)
             if [ "$existing" -eq 0 ]; then
                 arr_api "http://${ARR_HOST}:8787/api/v1/rootfolder" "$BOOKSHELF_API_KEY" POST \
-                    "{\"path\": \"/${folder}\", \"accessible\": true, \"defaultMetadataProfileId\": 1, \"defaultQualityProfileId\": 1}" > /dev/null 2>&1 && \
+                    "{\"path\": \"/${folder}\", \"name\": \"${fname}\", \"defaultMetadataProfileId\": 1, \"defaultQualityProfileId\": 1}" > /dev/null 2>&1 && \
                     log "  Bookshelf: root folder /${folder}" || true
             fi
         done
