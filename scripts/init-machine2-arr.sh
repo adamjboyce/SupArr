@@ -578,6 +578,43 @@ wait_for_api() {
     return 1
 }
 
+# --- SABnzbd: paths + categories ---
+if [ -n "${SABNZBD_API_KEY:-}" ]; then
+    SAB_URL="http://localhost:8085"
+    info "Waiting for SABnzbd API..."
+    SAB_READY=false
+    for attempt in $(seq 1 45); do
+        if curl -sf -o /dev/null "${SAB_URL}/api?mode=version&apikey=${SABNZBD_API_KEY}" 2>/dev/null; then
+            SAB_READY=true; break
+        fi
+        [ $((attempt % 10)) -eq 0 ] && info "  Still waiting for SABnzbd (attempt $attempt/45)... VPN may still be connecting"
+        sleep 2
+    done
+
+    if [ "$SAB_READY" = true ]; then
+        info "Configuring SABnzbd paths and categories..."
+
+        # Set download paths
+        curl -sf "${SAB_URL}/api?mode=set_config&section=misc&keyword=complete_dir&value=/downloads/usenet/complete&apikey=${SABNZBD_API_KEY}" > /dev/null 2>&1 && \
+            log "  SABnzbd: complete dir → /downloads/usenet/complete" || true
+        curl -sf "${SAB_URL}/api?mode=set_config&section=misc&keyword=download_dir&value=/downloads/usenet/incomplete&apikey=${SABNZBD_API_KEY}" > /dev/null 2>&1 && \
+            log "  SABnzbd: incomplete dir → /downloads/usenet/incomplete" || true
+
+        # Create categories matching *arr app names
+        for cat_name in radarr sonarr lidarr bookshelf whisparr; do
+            curl -sf "${SAB_URL}/api?mode=set_config&section=categories&keyword=${cat_name}&name=${cat_name}&pp=&script=&dir=${cat_name}&newzbin=&priority=-100&apikey=${SABNZBD_API_KEY}" > /dev/null 2>&1 && \
+                log "  SABnzbd: category '${cat_name}' → ${cat_name}/" || true
+        done
+
+        # Restart SABnzbd to apply path changes
+        curl -sf "${SAB_URL}/api?mode=restart&apikey=${SABNZBD_API_KEY}" > /dev/null 2>&1 || true
+        sleep 5
+        log "SABnzbd configured"
+    else
+        warn "SABnzbd API not ready — categories must be configured manually"
+    fi
+fi
+
 # --- RADARR ---
 if [ -n "${RADARR_API_KEY:-}" ]; then
     info "Configuring Radarr..."
@@ -727,6 +764,24 @@ if [ -n "${LIDARR_API_KEY:-}" ]; then
                 ],
                 \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
             }" > /dev/null && log "  Download client: qBittorrent" || true
+        fi
+
+        if [ -n "${SABNZBD_API_KEY:-}" ]; then
+            existing_sab=$(arr_api "http://${ARR_HOST}:8686/api/v1/downloadclient" "$LIDARR_API_KEY" | grep -c "SABnzbd" || true)
+            if [ "$existing_sab" -eq 0 ]; then
+                arr_api "http://${ARR_HOST}:8686/api/v1/downloadclient" "$LIDARR_API_KEY" POST "{
+                    \"enable\": true, \"protocol\": \"usenet\", \"priority\": 1,
+                    \"name\": \"SABnzbd\", \"implementation\": \"Sabnzbd\",
+                    \"configContract\": \"SabnzbdSettings\",
+                    \"fields\": [
+                        {\"name\": \"host\", \"value\": \"gluetun\"},
+                        {\"name\": \"port\", \"value\": 8085},
+                        {\"name\": \"apiKey\", \"value\": \"${SABNZBD_API_KEY}\"},
+                        {\"name\": \"musicCategory\", \"value\": \"lidarr\"}
+                    ],
+                    \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
+                }" > /dev/null && log "  Download client: SABnzbd" || true
+            fi
         fi
 
         log "Lidarr configured"
@@ -1019,8 +1074,27 @@ if [ -n "${BOOKSHELF_API_KEY:-}" ]; then
                     {\"name\": \"bookCategory\", \"value\": \"bookshelf\"}
                 ],
                 \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
-            }" > /dev/null 2>&1 && log "  Bookshelf: download client configured" || true
+            }" > /dev/null 2>&1 && log "  Bookshelf: download client (qBit)" || true
         fi
+
+        if [ -n "${SABNZBD_API_KEY:-}" ]; then
+            existing_sab=$(arr_api "http://${ARR_HOST}:8787/api/v1/downloadclient" "$BOOKSHELF_API_KEY" | grep -c "SABnzbd" || true)
+            if [ "$existing_sab" -eq 0 ]; then
+                arr_api "http://${ARR_HOST}:8787/api/v1/downloadclient" "$BOOKSHELF_API_KEY" POST "{
+                    \"enable\": true, \"protocol\": \"usenet\", \"priority\": 1,
+                    \"name\": \"SABnzbd\", \"implementation\": \"Sabnzbd\",
+                    \"configContract\": \"SabnzbdSettings\",
+                    \"fields\": [
+                        {\"name\": \"host\", \"value\": \"gluetun\"},
+                        {\"name\": \"port\", \"value\": 8085},
+                        {\"name\": \"apiKey\", \"value\": \"${SABNZBD_API_KEY}\"},
+                        {\"name\": \"bookCategory\", \"value\": \"bookshelf\"}
+                    ],
+                    \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
+                }" > /dev/null 2>&1 && log "  Bookshelf: download client (SABnzbd)" || true
+            fi
+        fi
+
         log "Bookshelf configured"
     fi
 fi
@@ -1051,8 +1125,27 @@ if [ -n "${WHISPARR_API_KEY:-}" ]; then
                     {\"name\": \"movieCategory\", \"value\": \"whisparr\"}
                 ],
                 \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
-            }" > /dev/null 2>&1 && log "  Whisparr: download client configured" || true
+            }" > /dev/null 2>&1 && log "  Whisparr: download client (qBit)" || true
         fi
+
+        if [ -n "${SABNZBD_API_KEY:-}" ]; then
+            existing_sab=$(arr_api "http://${ARR_HOST}:6969/api/v3/downloadclient" "$WHISPARR_API_KEY" | grep -c "SABnzbd" || true)
+            if [ "$existing_sab" -eq 0 ]; then
+                arr_api "http://${ARR_HOST}:6969/api/v3/downloadclient" "$WHISPARR_API_KEY" POST "{
+                    \"enable\": true, \"protocol\": \"usenet\", \"priority\": 1,
+                    \"name\": \"SABnzbd\", \"implementation\": \"Sabnzbd\",
+                    \"configContract\": \"SabnzbdSettings\",
+                    \"fields\": [
+                        {\"name\": \"host\", \"value\": \"gluetun\"},
+                        {\"name\": \"port\", \"value\": 8085},
+                        {\"name\": \"apiKey\", \"value\": \"${SABNZBD_API_KEY}\"},
+                        {\"name\": \"movieCategory\", \"value\": \"whisparr\"}
+                    ],
+                    \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
+                }" > /dev/null 2>&1 && log "  Whisparr: download client (SABnzbd)" || true
+            fi
+        fi
+
         # --- Whisparr Indexer Workaround ---
         # Prowlarr → Whisparr fullSync is broken (known bug). Add indexers as Torznab proxies.
         if [ -n "${PROWLARR_API_KEY:-}" ]; then
