@@ -43,6 +43,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../machine2-arr" && pwd)"
 
 # Load .env
 if [ -f "$PROJECT_DIR/.env" ]; then
+    set +H 2>/dev/null || true
     set -a; source "$PROJECT_DIR/.env"; set +a
     log "Loaded .env from $PROJECT_DIR"
 else
@@ -480,6 +481,7 @@ header "Phase 8: Post-Deploy API Configuration"
 # ===========================================================================
 
 # Re-source .env to pick up any newly written keys
+set +H 2>/dev/null || true
 set -a; source "$PROJECT_DIR/.env"; set +a
 
 ARR_HOST="localhost"
@@ -760,6 +762,7 @@ header "Phase 8b: Readarr, Whisparr, Bazarr & qBit Password"
 # ===========================================================================
 
 # Re-source .env to pick up any newly written keys
+set +H 2>/dev/null || true
 set -a; source "$PROJECT_DIR/.env"; set +a
 
 # --- qBittorrent: change default password ---

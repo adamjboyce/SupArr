@@ -39,6 +39,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../machine1-plex" && pwd)"
 
 if [ -f "$PROJECT_DIR/.env" ]; then
+    set +H 2>/dev/null || true
     set -a; source "$PROJECT_DIR/.env"; set +a
     log "Loaded .env"
 else
@@ -128,9 +129,15 @@ pkg_install "$PKG_MGR" $BASE_PKGS
 # Intel iGPU drivers (distro-specific)
 info "Installing Intel GPU drivers..."
 if [ "$PKG_MGR" = "apt" ]; then
-    # Add non-free firmware repo for Intel media driver
-    if ! grep -q "non-free" /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null; then
-        info "Enabling non-free repos for Intel drivers..."
+    # Debian 12 may use DEB822 format (.sources) or traditional format (.list)
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then
+        if ! grep -q "non-free-firmware" /etc/apt/sources.list.d/debian.sources 2>/dev/null; then
+            info "Enabling non-free repos (DEB822 format)..."
+            sed -i 's/^Components: main.*/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources
+            apt-get update -qq
+        fi
+    elif ! grep -q "non-free" /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null; then
+        info "Enabling non-free repos..."
         sed -i 's/bookworm main$/bookworm main contrib non-free non-free-firmware/' /etc/apt/sources.list
         apt-get update -qq
     fi

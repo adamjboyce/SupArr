@@ -205,6 +205,7 @@ else
     PROJECT_DIR="$ARR_PROJECT_DIR"
 fi
 
+set +H 2>/dev/null || true
 if [ "$ROLE" = "both" ]; then
     [ -f "$PLEX_PROJECT_DIR/.env" ] && { set -a; source "$PLEX_PROJECT_DIR/.env"; set +a; }
     [ -f "$ARR_PROJECT_DIR/.env" ] && { set -a; source "$ARR_PROJECT_DIR/.env"; set +a; }
@@ -752,6 +753,7 @@ if [ "$ROLE" = "both" ]; then
     bash "$SCRIPT_DIR/scripts/init-machine2-arr.sh"
 
     # Re-source *arr .env to get discovered API keys
+    set +H 2>/dev/null || true
     set -a; source "$ARR_PROJECT_DIR/.env"; set +a
 
     # Detect machine IP for cross-stack Overseerr → *arr connection
