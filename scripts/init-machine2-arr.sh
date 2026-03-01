@@ -374,6 +374,29 @@ if [ -f "$RECYCLARR_CONF" ]; then
     log "Recyclarr credentials substituted"
 fi
 
+# --- Stash: pre-seed config.yml to skip setup wizard ---
+STASH_CONFIG="$APPDATA/stash/config/config.yml"
+if [ ! -f "$STASH_CONFIG" ]; then
+    info "Pre-seeding Stash config..."
+    mkdir -p "$(dirname "$STASH_CONFIG")"
+    cat > "$STASH_CONFIG" << 'STASHCFG'
+stashes:
+  - path: /data
+    excludeVideo: false
+    excludeImage: false
+database: /root/.stash/stash-go.sqlite
+generated: /generated
+cache: /cache
+blobs_path: /root/.stash/blobs
+blobs_storage: FILESYSTEM
+host: 0.0.0.0
+port: 9999
+STASHCFG
+    log "Stash config pre-seeded (content path: /data, wizard skipped)"
+else
+    log "Stash config already exists — skipping pre-seed"
+fi
+
 # Set final ownership
 if [ "$REAL_USER" != "root" ]; then
     chown -R "$REAL_USER":"$REAL_USER" "$APPDATA"
@@ -1528,6 +1551,105 @@ else
 fi
 
 # ===========================================================================
+header "Phase 8f: Audiobookshelf & Stash Setup"
+# ===========================================================================
+
+# --- Audiobookshelf: create admin user + libraries via API ---
+ABS_URL="http://localhost:13378"
+ABS_READY=false
+info "Waiting for Audiobookshelf..."
+for attempt in $(seq 1 20); do
+    ABS_STATUS=$(curl -sf "$ABS_URL/status" 2>/dev/null | jq -r '.isInit // empty' 2>/dev/null || echo "")
+    if [ -n "$ABS_STATUS" ]; then
+        ABS_READY=true; break
+    fi
+    sleep 2
+done
+
+if [ "$ABS_READY" = true ]; then
+    if [ "$ABS_STATUS" = "false" ]; then
+        # First run — create admin user
+        ABS_PASS="${AUDIOBOOKSHELF_PASSWORD:-${QBIT_PASSWORD:-admin}}"
+        info "Creating Audiobookshelf admin user..."
+        curl -sf -X POST "$ABS_URL/init" \
+            -H "Content-Type: application/json" \
+            -d "{\"newRoot\":{\"username\":\"admin\",\"password\":\"${ABS_PASS}\"}}" > /dev/null 2>&1 \
+            && log "Audiobookshelf admin user created (user: admin)" \
+            || warn "Audiobookshelf admin creation failed"
+    else
+        log "Audiobookshelf already initialized"
+    fi
+
+    # Login to get token
+    ABS_PASS="${AUDIOBOOKSHELF_PASSWORD:-${QBIT_PASSWORD:-admin}}"
+    ABS_TOKEN=$(curl -sf -X POST "$ABS_URL/login" \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"admin\",\"password\":\"${ABS_PASS}\"}" 2>/dev/null | jq -r '.user.token // empty' 2>/dev/null || echo "")
+
+    if [ -n "$ABS_TOKEN" ]; then
+        # Create libraries idempotently
+        EXISTING_ABS_LIBS=$(curl -sf "$ABS_URL/api/libraries" \
+            -H "Authorization: Bearer $ABS_TOKEN" 2>/dev/null | jq -r '.libraries[].name // empty' 2>/dev/null || echo "")
+
+        for lib_spec in "Books:book:/books" "Audiobooks:book:/audiobooks"; do
+            lib_name="${lib_spec%%:*}"
+            lib_rest="${lib_spec#*:}"
+            lib_type="${lib_rest%%:*}"
+            lib_path="${lib_rest#*:}"
+
+            if echo "$EXISTING_ABS_LIBS" | grep -qx "$lib_name"; then
+                log "Audiobookshelf library '$lib_name' already exists"
+            else
+                curl -sf -X POST "$ABS_URL/api/libraries" \
+                    -H "Authorization: Bearer $ABS_TOKEN" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"name\":\"${lib_name}\",\"folders\":[{\"fullPath\":\"${lib_path}\"}],\"mediaType\":\"${lib_type}\",\"provider\":\"google\"}" > /dev/null 2>&1 \
+                    && log "Audiobookshelf library '$lib_name' created (${lib_path})" \
+                    || warn "Failed to create Audiobookshelf library '$lib_name'"
+            fi
+        done
+    else
+        warn "Could not authenticate with Audiobookshelf — libraries not created"
+    fi
+else
+    warn "Audiobookshelf not ready — skipping auto-config"
+fi
+
+# --- Stash: trigger initial scan ---
+STASH_URL="http://localhost:9999"
+STASH_READY=false
+info "Waiting for Stash..."
+for attempt in $(seq 1 20); do
+    STASH_STATUS=$(curl -sf -X POST "$STASH_URL/graphql" \
+        -H "Content-Type: application/json" \
+        -d '{"query":"{ systemStatus { status } }"}' 2>/dev/null | jq -r '.data.systemStatus.status // empty' 2>/dev/null || echo "")
+    if [ "$STASH_STATUS" = "OK" ]; then
+        STASH_READY=true; break
+    elif [ "$STASH_STATUS" = "SETUP" ]; then
+        # Config seed didn't take — run setup via API
+        info "Running Stash setup via API..."
+        curl -sf -X POST "$STASH_URL/graphql" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"mutation { setup(input: { stashes: [{path: \"/data\", excludeVideo: false, excludeImage: false}], databaseFile: \"\", generatedLocation: \"\", cacheLocation: \"\", storeBlobsInDatabase: false, blobsLocation: \"\", configLocation: \"\" }) }"}' > /dev/null 2>&1 \
+            && log "Stash setup completed via API" \
+            || warn "Stash API setup failed"
+        STASH_READY=true; break
+    fi
+    sleep 2
+done
+
+if [ "$STASH_READY" = true ]; then
+    info "Triggering Stash content scan..."
+    curl -sf -X POST "$STASH_URL/graphql" \
+        -H "Content-Type: application/json" \
+        -d '{"query":"mutation { metadataScan(input: { paths: [\"/data\"] }) }"}' > /dev/null 2>&1 \
+        && log "Stash scan triggered for /data" \
+        || warn "Stash scan trigger failed"
+else
+    warn "Stash not ready — skipping auto-config"
+fi
+
+# ===========================================================================
 header "Phase 9: Summary"
 # ===========================================================================
 
@@ -1570,6 +1692,8 @@ echo "  │  ✓ Weekly content digest to Discord               │"
 echo "  │  ✓ Immich photo/video backup (ML on NVMe)        │"
 echo "  │  ✓ Syncthing file sync (phone → NAS)             │"
 echo "  │  ✓ Immich DB backup cron (nightly, 7-day retain) │"
+echo "  │  ✓ Audiobookshelf: admin user + libraries        │"
+echo "  │  ✓ Stash: config seeded + content scan           │"
 if [ "$MIGRATE_LIBRARY" = "true" ]; then
 echo "  │  ✓ Migration source mounted (read-only)         │"
 fi
