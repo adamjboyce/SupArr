@@ -254,6 +254,26 @@ services:
       retries: 3
       start_period: 30s
 
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:latest
+    container_name: audiobookshelf
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+    ports: ["13378:80"]
+    volumes:
+      - ${APPDATA}/audiobookshelf/config:/config
+      - ${APPDATA}/audiobookshelf/metadata:/metadata
+      - ${MEDIA_ROOT}/audiobooks:/audiobooks
+      - ${MEDIA_ROOT}/books:/books
+    networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:80/healthcheck || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
   bazarr:
     image: linuxserver/bazarr:latest
     container_name: bazarr
@@ -292,6 +312,31 @@ services:
     networks: [arr-net]
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:6969/ping || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  stash:
+    image: stashapp/stash:latest
+    container_name: stash
+    restart: unless-stopped
+    environment:
+      - STASH_STASH=/data
+      - STASH_GENERATED=/generated
+      - STASH_METADATA=/metadata
+      - STASH_CACHE=/cache
+      - STASH_PORT=9999
+    ports: ["9999:9999"]
+    volumes:
+      - ${APPDATA}/stash/config:/root/.stash
+      - ${APPDATA}/stash/generated:/generated
+      - ${APPDATA}/stash/metadata:/metadata
+      - ${APPDATA}/stash/cache:/cache
+      - ${MEDIA_ROOT}/adult:/data
+    networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9999 || exit 1"]
       interval: 60s
       timeout: 10s
       retries: 3
