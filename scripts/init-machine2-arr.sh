@@ -165,6 +165,8 @@ mkdir -p "$APPDATA"/{unpackerr,notifiarr/config,homepage/config}
 mkdir -p "$APPDATA"/{whisparr/config,filebot/config,tailscale/state}
 mkdir -p "$APPDATA"/dozzle
 mkdir -p "$APPDATA"/backups
+mkdir -p "$APPDATA"/immich/{db,ml-cache,profile,encoded-video}
+mkdir -p "$APPDATA"/syncthing/config
 
 # Set ownership to real user
 if [ "$REAL_USER" != "root" ]; then
@@ -205,6 +207,12 @@ if [ -n "$NAS_IP" ]; then
     for dir in movies tv anime anime-movies documentaries stand-up concerts music books audiobooks adult; do
         mkdir -p "$MEDIA_ROOT/$dir" 2>/dev/null || true
     done
+
+    # Phone backup directories on NAS
+    mkdir -p "$MEDIA_ROOT"/photos/library 2>/dev/null || true
+    mkdir -p "$MEDIA_ROOT"/phone-backup 2>/dev/null || true
+    mkdir -p "$MEDIA_ROOT"/backups 2>/dev/null || true
+
     log "Media subdirectories ensured"
 
     # --- Downloads NFS mount (enables hardlinks: same filesystem as media) ---
@@ -1054,6 +1062,23 @@ if [ -n "${PLEX_TOKEN:-}" ] && [ -n "${PLEX_IP:-}" ]; then
 fi
 
 # ===========================================================================
+header "Phase 8e: Immich DB Backup Cron"
+# ===========================================================================
+
+info "Setting up nightly Immich database backup..."
+CRON_DUMP="0 3 * * * docker exec immich-db pg_dump -U immich immich | gzip > ${MEDIA_ROOT}/backups/immich-db-\$(date +\\%Y\\%m\\%d).sql.gz"
+CRON_PRUNE="5 3 * * * find ${MEDIA_ROOT}/backups/ -name \"immich-db-*.sql.gz\" -mtime +7 -delete"
+
+# Add cron entries idempotently
+EXISTING_CRON=$(crontab -l 2>/dev/null || echo "")
+if echo "$EXISTING_CRON" | grep -q "immich-db"; then
+    log "Immich backup cron already configured"
+else
+    (echo "$EXISTING_CRON"; echo "$CRON_DUMP"; echo "$CRON_PRUNE") | crontab -
+    log "Immich backup cron installed (nightly at 3 AM, 7-day retention)"
+fi
+
+# ===========================================================================
 header "Phase 9: Summary"
 # ===========================================================================
 
@@ -1089,6 +1114,9 @@ echo "  │  ✓ Plex library scan on import (if Plex token)    │"
 echo "  │  ✓ Config backup automation (weekly + rotation)    │"
 echo "  │  ✓ Maintenance automation (disk, stale, cleanup)  │"
 echo "  │  ✓ Weekly content digest to Discord               │"
+echo "  │  ✓ Immich photo/video backup (ML on NVMe)        │"
+echo "  │  ✓ Syncthing file sync (phone → NAS)             │"
+echo "  │  ✓ Immich DB backup cron (nightly, 7-day retain) │"
 echo "  └─────────────────────────────────────────────────────┘"
 echo ""
 warn "STILL NEEDS MANUAL SETUP:"
@@ -1106,6 +1134,24 @@ echo ""
 echo "  Radarr Lists — the CouchPotato replacement:"
 echo "    → Create lists at mdblist.com (RT > 85%, etc.)"
 echo "    → Radarr → Settings → Lists → Add → MDBList"
+echo ""
+echo "  Immich  (http://localhost:2283)"
+echo "    → Create admin account on first visit"
+echo "    → Install Immich app on Android (Play Store)"
+echo "    → Connect to http://localhost:2283 (or Tailscale IP when remote)"
+echo "    → Enable background backup in app"
+echo ""
+echo "  Syncthing  (http://localhost:8384)"
+echo "    → Set admin password"
+echo "    → Install Syncthing on Android (F-Droid or Play Store)"
+echo "    → Pair devices via QR code"
+echo "    → Share folders: DCIM, Downloads, Documents, Signal, etc."
+echo "    → Syncs over LAN and Tailscale automatically"
+echo ""
+echo "  SMS Backup (Android app — not a server component)"
+echo "    → Install \"SMS Backup & Restore\" from Play Store"
+echo "    → Schedule daily backups to a local folder"
+echo "    → Add that folder to Syncthing → auto-syncs to NAS"
 echo ""
 echo "  To re-run post-deploy config after manual steps:"
 echo "    sudo ../scripts/init-machine2-arr.sh"

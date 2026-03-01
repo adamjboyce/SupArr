@@ -340,6 +340,11 @@ ask NOTIFIARR_API_KEY "Notifiarr API key (or 'skip')" "skip"
 [ "$NOTIFIARR_API_KEY" = "skip" ] && NOTIFIARR_API_KEY=""
 
 echo ""
+echo -e "  ${BOLD}Immich — Phone Photo Backup${NC}"
+echo -e "  ${DIM}Self-hosted Google Photos. ML on this machine, photos on NAS.${NC}\n"
+ask IMMICH_DB_PASSWORD "Immich database password" "$(openssl rand -hex 12)" "secret"
+
+echo ""
 echo -e "  ${BOLD}Discord Notifications${NC}"
 echo -e "  ${DIM}Get webhook URL: Server Settings → Integrations → Webhooks${NC}\n"
 ask DISCORD_WEBHOOK_URL "Discord webhook URL (or 'skip')" "skip"
@@ -478,6 +483,7 @@ TRAKT_ACCESS_TOKEN=${TRAKT_ACCESS_TOKEN}
 PLEX_TOKEN=${PLEX_TOKEN}
 PLEX_IP=${PLEX_IP_FOR_KOMETA}
 TMDB_API_KEY=${TMDB_API_KEY}
+IMMICH_DB_PASSWORD=${IMMICH_DB_PASSWORD:-}
 DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
 WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL}
 ENVEOF
@@ -897,6 +903,8 @@ echo -e "    qBittorrent → http://${ARR_IP_ADDR}:8080"
 echo -e "    SABnzbd     → http://${ARR_IP_ADDR}:8085"
 echo -e "    Homepage    → http://${ARR_IP_ADDR}:3101"
 echo -e "    Dozzle      → http://${ARR_IP_ADDR}:8888"
+echo -e "    Immich      → http://${ARR_IP_ADDR}:2283"
+echo -e "    Syncthing   → http://${ARR_IP_ADDR}:8384"
 
 if [ "$SINGLE_MACHINE" = false ]; then
     echo ""
@@ -933,6 +941,9 @@ echo -e "  ${BOLD}Privateer (*arr):${NC}"
 echo -e "    → Prowlarr: add your indexers (credentials required)"
 echo -e "    → SABnzbd: run setup wizard, add Usenet servers"
 echo -e "    → Bazarr: add subtitle providers (OpenSubtitles.com)"
+echo -e "    → Immich: create admin account, install Android app"
+echo -e "    → Syncthing: set password, pair phone, share folders"
+echo -e "    → SMS Backup: install Android app, schedule daily, add to Syncthing"
 echo ""
 echo -e "  ${DIM}Project files synced to ${REMOTE_PROJECT_PATH}.${NC}"
 echo -e "  ${DIM}To re-run, SSH in and run the init script directly.${NC}"

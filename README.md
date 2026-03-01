@@ -213,6 +213,37 @@ Daily maintenance cycle:
 ### Weekly Content Digest
 Queries *arr history APIs every 7 days and sends a formatted Discord summary of recently imported movies, TV shows, and music albums.
 
+## Phone Backup
+
+### Immich (Google Photos Replacement)
+Self-hosted photo/video management with ML-powered features:
+- **Automatic upload** from Android app (background sync over LAN or Tailscale)
+- **Facial recognition** + CLIP-based search + object detection
+- Timeline view, map view, album sharing, duplicate detection
+- Video transcoding for web previews
+
+**Storage split:** Originals on NAS (`${MEDIA_ROOT}/photos/library/`), ML cache + thumbnails + Postgres on local NVMe (`${APPDATA}/immich/`). NVMe death = run `setup.sh` + restore one `pg_dump` — originals are safe on RAID6.
+
+**Nightly backup:** `pg_dump` cron at 3 AM → `${MEDIA_ROOT}/backups/immich-db-YYYYMMDD.sql.gz` (7-day retention).
+
+**Recovery:** `gunzip -c immich-db-YYYYMMDD.sql.gz | docker exec -i immich-db psql -U immich immich` — Immich regenerates thumbnails and ML embeddings from originals.
+
+**Web UI:** `http://PRIVATEER_IP:2283`
+
+### Syncthing (Phone File Sync)
+Peer-to-peer continuous file sync between phone and NAS via Privateer. No cloud. Handles:
+- Camera roll (belt-and-suspenders with Immich)
+- Downloads, Documents, Signal/WhatsApp backups
+- SMS Backup & Restore output
+- Any arbitrary folders
+
+All synced data writes directly to NAS: `${MEDIA_ROOT}/phone-backup/`. Discovers peers via LAN and Tailscale automatically.
+
+**Web UI:** `http://PRIVATEER_IP:8384`
+
+### SMS/Call Log Backup
+Android app (SMS Backup & Restore by SyncTech) → daily automatic backup → local folder → Syncthing pushes to NAS. Documentation only — no server component.
+
 ## 40TB Library Import
 
 FileBot container is deployed on Privateer for large library imports:
@@ -251,7 +282,12 @@ Useful re-run scenarios:
 ## Architecture
 
 ```
-  Spyglass (Plex)                        Privateer (*arr)
+  Phone (Android)
+    ├── Immich App ──── LAN / Tailscale ────┐
+    ├── Syncthing App ─ LAN / Tailscale ────┤
+    └── SMS Backup → Syncthing folder ──────┤
+                                             │
+  Spyglass (Plex)                        Privateer (*arr + Phone Backup)
   ┌─────────────────────────┐            ┌──────────────────────────────┐
   │ Plex (Quick Sync HW)    │            │ Gluetun (NordVPN)           │
   │ Tdarr (H.265 encoding)  │            │   ├── qBittorrent (masked)  │
@@ -263,13 +299,17 @@ Useful re-run scenarios:
   │ Tailscale (remote)       │            │ Unpackerr, Notifiarr        │
   │ Backup (weekly)          │            │ Download Monitor (health)    │
   └────────┬────────────────┘            │ Backup, Maintenance, Digest  │
-           │                              │ Homepage (:3101), Dozzle     │
-           └──────────────┬──────────────┤ Tailscale (remote)           │
-                          │              └──────────┬───────────────────┘
-                 ┌────────┴─────────────────────────┘
-                 │        NAS (NFS)
-                 │  /media   /downloads
-                 └──────────────────────
+           │                              │ Immich (server+ML+Redis+PG) ◄┘
+           │                              │ Syncthing (phone → NAS)     ◄┘
+           └──────────────┬──────────────┤ Homepage (:3101), Dozzle     │
+                          │              │ Tailscale (remote)           │
+                 ┌────────┴──────────────┴──────────┬───────────────────┘
+                 │        NAS (NFS 10GbE)           │
+                 │  /media   /downloads             │
+                 │  /photos/library  (Immich)       │
+                 │  /phone-backup    (Syncthing)    │
+                 │  /backups         (Immich DB)    │
+                 └──────────────────────────────────┘
 ```
 
 Single-machine mode: both stacks run on the same box, different APPDATA dirs.
@@ -310,7 +350,7 @@ media-stack-final/
 │       └── homepage-services.yaml
 └── machine2-arr/
     ├── .env.example
-    ├── docker-compose.yml                 ← +backup-privateer, maintenance, weekly-digest
+    ├── docker-compose.yml                 ← +immich, syncthing, backup, maintenance, digest
     ├── config-seeds/
     │   └── qbittorrent/
     │       └── qBittorrent.conf
@@ -350,6 +390,9 @@ media-stack-final/
 | Disk monitoring | maintenance container | Alert at 85% usage, daily check |
 | Stale download cleanup | maintenance container | Remove incomplete >7 days |
 | Weekly digest | weekly-digest container | Discord summary every 7 days |
+| Immich photo backup | immich-server | ML on NVMe, originals on NAS RAID6 |
+| Immich DB backup | cron (3 AM) | pg_dump to NAS, 7-day retention |
+| Syncthing phone sync | syncthing | Phone → NAS direct write |
 
 ## Configuration Variables
 
@@ -369,6 +412,7 @@ media-stack-final/
 | `DISK_ALERT_THRESHOLD` | Privateer compose | Disk usage % to trigger alert (default: 85) |
 | `BACKUP_RETENTION_DAYS` | Both compose files | Days to keep config backups (default: 7) |
 | `BACKUP_INTERVAL` | Both compose files | Seconds between backups (default: 604800 = 7 days) |
+| `IMMICH_DB_PASSWORD` | Privateer .env | Immich Postgres password (auto-generated by setup.sh) |
 
 All *arr API keys are auto-populated by the init script. See `.env.example` files for the complete list.
 

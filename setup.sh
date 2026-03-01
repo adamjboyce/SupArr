@@ -352,6 +352,12 @@ collect_arr_questions() {
     [ "$TRAKT_CLIENT_ID" = "skip" ] && TRAKT_CLIENT_ID=""
     [ "$TRAKT_CLIENT_SECRET" = "skip" ] && TRAKT_CLIENT_SECRET=""
 
+    header "Immich — Phone Photo Backup"
+    echo -e "  ${DIM}Self-hosted Google Photos. ML processing on this machine,${NC}"
+    echo -e "  ${DIM}photo storage on the NAS. Android app syncs automatically.${NC}\n"
+
+    ask IMMICH_DB_PASSWORD "Immich database password" "$(openssl rand -hex 12)" "secret"
+
     # API keys — init script populates these automatically
     RADARR_API_KEY="${RADARR_API_KEY:-}"
     SONARR_API_KEY="${SONARR_API_KEY:-}"
@@ -482,6 +488,7 @@ TRAKT_ACCESS_TOKEN=${TRAKT_ACCESS_TOKEN:-}
 PLEX_TOKEN=${PLEX_TOKEN:-}
 PLEX_IP=${PLEX_IP:-}
 TMDB_API_KEY=${TMDB_API_KEY:-}
+IMMICH_DB_PASSWORD=${IMMICH_DB_PASSWORD:-}
 DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
 WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL}
 ENVEOF
@@ -819,6 +826,15 @@ if [ "$ROLE" = "arr" ] || [ "$ROLE" = "both" ]; then
     echo -e "    ${DIM}  1. Create filters at mdblist.com (RT > 85%, etc.)${NC}"
     echo -e "    ${DIM}  2. Add as MDBList import in Radarr${NC}"
     echo -e "    ${DIM}  3. Auto-downloads matching movies forever${NC}"
+    echo ""
+    echo -e "    ${BOLD}Immich${NC}  →  http://localhost:2283"
+    echo -e "    ${DIM}Create admin account, install Android app, enable background backup${NC}"
+    echo ""
+    echo -e "    ${BOLD}Syncthing${NC}  →  http://localhost:8384"
+    echo -e "    ${DIM}Set admin password, pair phone, share folders (DCIM, Downloads, etc.)${NC}"
+    echo ""
+    echo -e "    ${BOLD}SMS Backup${NC}  (Android app — not a server component)"
+    echo -e "    ${DIM}Install \"SMS Backup & Restore\", schedule daily, add folder to Syncthing${NC}"
 fi
 
 echo ""
