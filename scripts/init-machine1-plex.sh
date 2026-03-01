@@ -606,10 +606,26 @@ if [ "$TDARR_READY" = true ]; then
         -d '{"data":{"collection":"NodeJSONDB","mode":"getAll"}}' 2>/dev/null | \
         jq -r '.[0]._id // empty' 2>/dev/null || echo "")
     if [ -n "$NODE_ID" ]; then
+        # Set worker limits
         curl -sf -X POST "${TDARR_URL}/api/v2/cruddb" \
             -H "Content-Type: application/json" \
             -d "{\"data\":{\"collection\":\"NodeJSONDB\",\"mode\":\"update\",\"docID\":\"${NODE_ID}\",\"obj\":{\"workerLimits\":{\"transcodegpu\":1,\"healthcheckcpu\":1,\"transcodecpu\":0,\"healthcheckgpu\":0}}}}" > /dev/null 2>&1 && \
             log "  Tdarr node '${NODE_ID}': 1 GPU transcode + 1 CPU healthcheck worker"
+
+        # Set node schedule — per-hour worker counts (overrides workerLimits per time slot)
+        # Without this, all hours default to 0 workers and nothing processes
+        NODE_SCHED='['
+        for h in $(seq 0 23); do
+            h2=$((h+1)); [ $h2 -eq 24 ] && h2=0
+            [ $h -gt 0 ] && NODE_SCHED="${NODE_SCHED},"
+            NODE_SCHED="${NODE_SCHED}{\"_id\":\"$(printf '%02d' $h)-$(printf '%02d' $h2)\",\"healthcheckcpu\":1,\"healthcheckgpu\":0,\"transcodecpu\":0,\"transcodegpu\":1}"
+        done
+        NODE_SCHED="${NODE_SCHED}]"
+
+        curl -sf -X POST "${TDARR_URL}/api/v2/cruddb" \
+            -H "Content-Type: application/json" \
+            -d "{\"data\":{\"collection\":\"NodeJSONDB\",\"mode\":\"update\",\"docID\":\"${NODE_ID}\",\"obj\":{\"schedule\":${NODE_SCHED}}}}" > /dev/null 2>&1 && \
+            log "  Tdarr node schedule: all 24 hours active (1 GPU transcode + 1 CPU healthcheck)"
     fi
 
     # Trigger initial scans (NFS doesn't support inotify, needs explicit scan)
