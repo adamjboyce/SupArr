@@ -406,7 +406,7 @@ else
     log "SSH key already exists: $SSH_KEY"
 fi
 
-SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ServerAliveInterval=30 -o ServerAliveCountMax=10"
 
 push_key() {
     local host="$1" label="$2"
@@ -514,9 +514,13 @@ if [ "$SSH_USER" != "root" ]; then
     fi
 
     # Switch to root for all subsequent operations
+    ORIG_SSH_USER="$SSH_USER"
     SSH_USER="root"
     log "Using root for deployment operations"
 fi
+
+# Preserve original SSH user for init scripts (so they know the non-root target user)
+ORIG_SSH_USER="${ORIG_SSH_USER:-$SSH_USER}"
 
 # Ensure rsync is available on targets (fresh Debian minimal may not have it)
 for i in "${!TARGETS[@]}"; do
@@ -681,8 +685,11 @@ run_init() {
         fi
     fi
 
+    # Pass DEPLOY_USER so init scripts know the non-root target user even
+    # when running as root via SSH (where SUDO_USER is unset).
+    # The init scripts self-log to /opt/suparr/*-init.log via exec tee.
     # shellcheck disable=SC2086
-    $SSH_CMD "${SSH_USER}@${host}" "${sudo_prefix} bash ${REMOTE_PROJECT_PATH}/scripts/${script}" 2>&1
+    $SSH_CMD "${SSH_USER}@${host}" "DEPLOY_USER='${ORIG_SSH_USER}' ${sudo_prefix} bash ${REMOTE_PROJECT_PATH}/scripts/${script}" 2>&1
 }
 
 # ── Overseerr readiness check (remote, quiet) ─────────────────────────────────
@@ -1076,6 +1083,14 @@ fi
 echo ""
 echo -e "  ${DIM}Project files synced to ${REMOTE_PROJECT_PATH}.${NC}"
 echo -e "  ${DIM}To re-run, SSH in and run the init script directly.${NC}"
+echo ""
+echo -e "  ${BOLD}Deploy logs on remote machines:${NC}"
+echo -e "  ${DIM}  Spyglass:  ssh ${ORIG_SSH_USER}@${PLEX_IP_ADDR} cat /opt/suparr/spyglass-init.log${NC}"
+if [ "$SINGLE_MACHINE" = false ]; then
+    echo -e "  ${DIM}  Privateer: ssh ${ORIG_SSH_USER}@${ARR_IP_ADDR} cat /opt/suparr/privateer-init.log${NC}"
+else
+    echo -e "  ${DIM}  Privateer: ssh ${ORIG_SSH_USER}@${PLEX_IP_ADDR} cat /opt/suparr/privateer-init.log${NC}"
+fi
 echo ""
 
 # ── Post-deploy polling (Overseerr + Kometa) ──────────────────────────────────

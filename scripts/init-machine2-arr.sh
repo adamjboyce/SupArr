@@ -28,6 +28,16 @@
 
 set -euo pipefail
 
+# ── Self-logging ──────────────────────────────────────────────────────────
+# All output is tee'd to a persistent log file so failures are diagnosable
+# even if the SSH session dies mid-run.
+DEPLOY_LOG="/opt/suparr/privateer-init.log"
+mkdir -p "$(dirname "$DEPLOY_LOG")" 2>/dev/null || true
+exec > >(tee -a "$DEPLOY_LOG") 2>&1
+echo ""
+echo "=== Privateer init started at $(date -Iseconds) ==="
+echo ""
+
 # Colors
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -58,6 +68,23 @@ DOWNLOADS_ROOT="${DOWNLOADS_ROOT:-/mnt/downloads}"
 QBIT_PASSWORD="${QBIT_PASSWORD:-adminadmin}"
 NAS_IP="${NAS_IP:-}"
 NAS_MEDIA_EXPORT="${NAS_MEDIA_EXPORT:-/volume1/media}"
+
+# Detect the real (non-root) user who should own files and be in docker group.
+# Priority: SUDO_USER (ran via sudo), DEPLOY_USER (set by remote-deploy.sh),
+# then fall back to first non-root user with a real home dir and login shell.
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    REAL_USER="$SUDO_USER"
+elif [ -n "${DEPLOY_USER:-}" ] && [ "$DEPLOY_USER" != "root" ]; then
+    REAL_USER="$DEPLOY_USER"
+elif [ "$USER" != "root" ]; then
+    REAL_USER="$USER"
+else
+    REAL_USER=$(awk -F: '$3 >= 1000 && $3 < 60000 && $7 ~ /bash|zsh|fish/ {print $1; exit}' /etc/passwd)
+    REAL_USER="${REAL_USER:-root}"
+    if [ "$REAL_USER" != "root" ]; then
+        log "Detected non-root user: $REAL_USER"
+    fi
+fi
 NAS_DOWNLOADS_EXPORT="${NAS_DOWNLOADS_EXPORT:-/volume1/downloads}"
 MIGRATE_LIBRARY="${MIGRATE_LIBRARY:-false}"
 MIGRATE_SOURCE="${MIGRATE_SOURCE:-}"
@@ -151,7 +178,6 @@ else
 fi
 
 # Add the real user (not root) to docker group
-REAL_USER="${SUDO_USER:-$USER}"
 if [ "$REAL_USER" != "root" ]; then
     usermod -aG docker "$REAL_USER"
     log "Added $REAL_USER to docker group"

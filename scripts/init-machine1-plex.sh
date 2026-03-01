@@ -26,6 +26,16 @@
 
 set -euo pipefail
 
+# ── Self-logging ──────────────────────────────────────────────────────────
+# All output is tee'd to a persistent log file so failures are diagnosable
+# even if the SSH session dies mid-run.
+DEPLOY_LOG="/opt/suparr/spyglass-init.log"
+mkdir -p "$(dirname "$DEPLOY_LOG")" 2>/dev/null || true
+exec > >(tee -a "$DEPLOY_LOG") 2>&1
+echo ""
+echo "=== Spyglass init started at $(date -Iseconds) ==="
+echo ""
+
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
@@ -51,7 +61,24 @@ APPDATA="${APPDATA:-/opt/media-stack}"
 MEDIA_ROOT="${MEDIA_ROOT:-/mnt/media}"
 NAS_IP="${NAS_IP:-}"
 NAS_MEDIA_EXPORT="${NAS_MEDIA_EXPORT:-/volume1/media}"
-REAL_USER="${SUDO_USER:-$USER}"
+
+# Detect the real (non-root) user who should own files and be in docker group.
+# Priority: SUDO_USER (ran via sudo), DEPLOY_USER (set by remote-deploy.sh),
+# then fall back to first non-root user with a real home dir and login shell.
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    REAL_USER="$SUDO_USER"
+elif [ -n "${DEPLOY_USER:-}" ] && [ "$DEPLOY_USER" != "root" ]; then
+    REAL_USER="$DEPLOY_USER"
+elif [ "$USER" != "root" ]; then
+    REAL_USER="$USER"
+else
+    # Running as root via SSH with no SUDO_USER — find the primary non-root user
+    REAL_USER=$(awk -F: '$3 >= 1000 && $3 < 60000 && $7 ~ /bash|zsh|fish/ {print $1; exit}' /etc/passwd)
+    REAL_USER="${REAL_USER:-root}"
+    if [ "$REAL_USER" != "root" ]; then
+        log "Detected non-root user: $REAL_USER"
+    fi
+fi
 
 # ── OS Portability ─────────────────────────────────────────────────────────
 detect_pkg_manager() {
@@ -130,15 +157,21 @@ pkg_install "$PKG_MGR" $BASE_PKGS
 info "Installing Intel GPU drivers..."
 if [ "$PKG_MGR" = "apt" ]; then
     # Debian 12 may use DEB822 format (.sources) or traditional format (.list)
+    # Check for "contrib" specifically — "non-free-firmware" contains "non-free"
+    # as a substring, which gives false positives. "contrib" is always paired
+    # with "non-free" when properly enabled.
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then
-        if ! grep -q "non-free-firmware" /etc/apt/sources.list.d/debian.sources 2>/dev/null; then
+        if ! grep -q "contrib" /etc/apt/sources.list.d/debian.sources 2>/dev/null; then
             info "Enabling non-free repos (DEB822 format)..."
             sed -i 's/^Components: main.*/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources
             apt-get update -qq
         fi
-    elif ! grep -q "non-free" /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null; then
+    elif ! grep -q "contrib" /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null; then
         info "Enabling non-free repos..."
-        sed -i 's/bookworm main$/bookworm main contrib non-free non-free-firmware/' /etc/apt/sources.list
+        # Handle lines that already have non-free-firmware but lack contrib + non-free
+        sed -i 's/bookworm main.*/bookworm main contrib non-free non-free-firmware/' /etc/apt/sources.list
+        # Deduplicate in case non-free-firmware appeared twice
+        sed -i 's/non-free-firmware non-free-firmware/non-free-firmware/' /etc/apt/sources.list
         apt-get update -qq
     fi
     pkg_install "$PKG_MGR" intel-media-va-driver-non-free intel-gpu-tools vainfo
