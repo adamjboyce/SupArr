@@ -238,14 +238,22 @@ if [ -n "$NAS_IP" ]; then
     fi
 
     # Create media subdirectories on NAS mount
+    # Use real user to avoid NFS root_squash (root → nobody can't mkdir/chown)
+    _nfs_mkdir() {
+        if [ "$REAL_USER" != "root" ]; then
+            sudo -u "$REAL_USER" mkdir -p "$1" 2>/dev/null || mkdir -p "$1" 2>/dev/null || true
+        else
+            mkdir -p "$1" 2>/dev/null || true
+        fi
+    }
     for dir in movies tv anime anime-movies documentaries stand-up concerts music books audiobooks adult; do
-        mkdir -p "$MEDIA_ROOT/$dir" 2>/dev/null || true
+        _nfs_mkdir "$MEDIA_ROOT/$dir"
     done
 
-    # Phone backup directories on NAS
-    mkdir -p "$MEDIA_ROOT"/photos/library 2>/dev/null || true
-    mkdir -p "$MEDIA_ROOT"/phone-backup 2>/dev/null || true
-    mkdir -p "$MEDIA_ROOT"/backups 2>/dev/null || true
+    # Phone backup / Immich / backup directories on NAS
+    _nfs_mkdir "$MEDIA_ROOT/photos/library"
+    _nfs_mkdir "$MEDIA_ROOT/phone-backup"
+    _nfs_mkdir "$MEDIA_ROOT/backups"
 
     log "Media subdirectories ensured"
 
@@ -264,8 +272,13 @@ if [ -n "$NAS_IP" ]; then
             mount "$DOWNLOADS_ROOT" && log "Mounted $DOWNLOADS_ROOT" || warn "Could not mount $DOWNLOADS_ROOT — check NAS export"
         fi
 
-        # Create download subdirectories
-        mkdir -p "$DOWNLOADS_ROOT"/{torrents/{complete,incomplete},usenet/{complete,incomplete}} 2>/dev/null || true
+        # Create download subdirectories (use real user for NFS root_squash)
+        if [ "$REAL_USER" != "root" ]; then
+            sudo -u "$REAL_USER" mkdir -p "$DOWNLOADS_ROOT"/{torrents/{complete,incomplete},usenet/{complete,incomplete}} 2>/dev/null || \
+                mkdir -p "$DOWNLOADS_ROOT"/{torrents/{complete,incomplete},usenet/{complete,incomplete}} 2>/dev/null || true
+        else
+            mkdir -p "$DOWNLOADS_ROOT"/{torrents/{complete,incomplete},usenet/{complete,incomplete}} 2>/dev/null || true
+        fi
         log "Download directories ensured on NAS"
     fi
 
@@ -350,11 +363,11 @@ header "Phase 6: Docker Compose Up"
 info "Starting *arr stack..."
 cd "$PROJECT_DIR"
 
-# Run as real user if possible
+# Run as real user if possible — tolerate partial failures (restart policies recover)
 if [ "$REAL_USER" != "root" ] && id -nG "$REAL_USER" | grep -qw docker; then
-    sudo -u "$REAL_USER" docker compose up -d --remove-orphans
+    sudo -u "$REAL_USER" docker compose up -d --remove-orphans || warn "Some containers failed initial start — restart policies will recover"
 else
-    docker compose up -d --remove-orphans
+    docker compose up -d --remove-orphans || warn "Some containers failed initial start — restart policies will recover"
 fi
 
 log "All containers starting"
