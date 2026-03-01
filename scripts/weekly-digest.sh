@@ -23,6 +23,7 @@ send_digest() {
     fi
 
     local digest=""
+    local NL=$'\n'
     local cutoff_date
     cutoff_date=$(date -d "7 days ago" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
                   date -u -d "@$(($(date +%s) - 604800))" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "")
@@ -45,9 +46,9 @@ send_digest() {
             if [ -n "$movie_list" ]; then
                 local count
                 count=$(echo "$movie_list" | wc -l)
-                digest="${digest}\n**Movies** (${count}):\n"
+                digest+="${NL}**Movies** (${count}):${NL}"
                 while IFS= read -r title; do
-                    digest="${digest}- ${title}\n"
+                    digest+="- ${title}${NL}"
                 done <<< "$movie_list"
             fi
         fi
@@ -73,9 +74,9 @@ send_digest() {
             if [ -n "$show_list" ]; then
                 local count
                 count=$(echo "$show_list" | wc -l)
-                digest="${digest}\n**TV Shows** (${count} shows):\n"
+                digest+="${NL}**TV Shows** (${count} shows):${NL}"
                 while IFS= read -r show; do
-                    digest="${digest}- ${show}\n"
+                    digest+="- ${show}${NL}"
                 done <<< "$show_list"
             fi
         fi
@@ -99,9 +100,9 @@ send_digest() {
             if [ -n "$album_list" ]; then
                 local count
                 count=$(echo "$album_list" | wc -l)
-                digest="${digest}\n**Music** (${count}):\n"
+                digest+="${NL}**Music** (${count}):${NL}"
                 while IFS= read -r album; do
-                    digest="${digest}- ${album}\n"
+                    digest+="- ${album}${NL}"
                 done <<< "$album_list"
             fi
         fi
@@ -109,17 +110,18 @@ send_digest() {
 
     # --- Send digest ---
     if [ -n "$digest" ]; then
-        local message
-        message="**Weekly Media Digest**\n${digest}"
+        local message="**Weekly Media Digest**${NL}${digest}"
         # Discord message limit is 2000 chars — truncate if needed
         if [ ${#message} -gt 1900 ]; then
-            message="${message:0:1900}\n...(truncated)"
+            message="${message:0:1900}${NL}...(truncated)"
         fi
 
+        local payload
+        payload=$(jq -n --arg c "$message" --arg u "Weekly Digest" \
+            '{username: $u, content: $c}')
         curl -sf -X POST "$DISCORD_WEBHOOK_URL" \
             -H "Content-Type: application/json" \
-            -d "{\"username\": \"Weekly Digest\", \"content\": \"$(echo -e "$message" | sed 's/"/\\"/g')\"}" \
-            > /dev/null 2>&1 && \
+            -d "$payload" > /dev/null 2>&1 && \
             log "Weekly digest sent to Discord" || \
             warn "Could not send digest to Discord"
     else

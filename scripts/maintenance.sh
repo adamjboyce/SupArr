@@ -22,10 +22,12 @@ warn() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [!!] $1"; }
 notify_discord() {
     local message="$1"
     if [ -z "$DISCORD_WEBHOOK_URL" ]; then return; fi
+    local payload
+    payload=$(jq -n --arg c "$message" --arg u "Maintenance Bot" \
+        '{username: $u, content: $c}')
     curl -sf -X POST "$DISCORD_WEBHOOK_URL" \
         -H "Content-Type: application/json" \
-        -d "{\"username\": \"Maintenance Bot\", \"content\": \"$message\"}" \
-        > /dev/null 2>&1 || true
+        -d "$payload" > /dev/null 2>&1 || true
 }
 
 check_disk_space() {
@@ -40,7 +42,7 @@ check_disk_space() {
             local mount_info
             mount_info=$(df -h "$mount_point" 2>/dev/null | awk 'NR==2 {print $4 " free of " $2}')
             warn "DISK ALERT: ${mount_point} at ${usage}% (${mount_info})"
-            alerts="${alerts}\n- **${mount_point}**: ${usage}% used (${mount_info})"
+            alerts+=$'\n'"- **${mount_point}**: ${usage}% used (${mount_info})"
         else
             log "  ${mount_point}: ${usage}% used"
         fi

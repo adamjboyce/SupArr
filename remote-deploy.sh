@@ -345,6 +345,27 @@ echo -e "  ${DIM}Self-hosted Google Photos. ML on this machine, photos on NAS.${
 ask IMMICH_DB_PASSWORD "Immich database password" "$(openssl rand -hex 12)" "secret"
 
 echo ""
+echo -e "  ${BOLD}Media Library Migration (Optional)${NC}"
+echo -e "  ${DIM}Import an existing library into the *arr folder structure.${NC}\n"
+
+MIGRATE_LIBRARY="${MIGRATE_LIBRARY:-false}"
+MIGRATE_SOURCE="${MIGRATE_SOURCE:-}"
+MIGRATE_NAS_EXPORT="${MIGRATE_NAS_EXPORT:-}"
+
+if [ "$MIGRATE_LIBRARY" != "true" ]; then
+    if ask_yn "Have an existing media library to import?" "n"; then
+        MIGRATE_LIBRARY="true"
+        if ask_yn "Is the library on your NAS?" "y"; then
+            ask MIGRATE_NAS_EXPORT "NFS export path for existing library" "/volume1/old-media"
+            validate_path "$MIGRATE_NAS_EXPORT" || { err "Export path must be absolute"; exit 1; }
+        else
+            ask MIGRATE_SOURCE "Local path to existing library" "/mnt/external/media"
+            validate_path "$MIGRATE_SOURCE" || { err "Path must be absolute"; exit 1; }
+        fi
+    fi
+fi
+
+echo ""
 echo -e "  ${BOLD}Discord Notifications${NC}"
 echo -e "  ${DIM}Get webhook URL: Server Settings → Integrations → Webhooks${NC}\n"
 ask DISCORD_WEBHOOK_URL "Discord webhook URL (or 'skip')" "skip"
@@ -484,6 +505,9 @@ PLEX_TOKEN=${PLEX_TOKEN}
 PLEX_IP=${PLEX_IP_FOR_KOMETA}
 TMDB_API_KEY=${TMDB_API_KEY}
 IMMICH_DB_PASSWORD=${IMMICH_DB_PASSWORD:-}
+MIGRATE_LIBRARY=${MIGRATE_LIBRARY:-false}
+MIGRATE_SOURCE=${MIGRATE_SOURCE:-}
+MIGRATE_NAS_EXPORT=${MIGRATE_NAS_EXPORT:-}
 DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
 WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL}
 ENVEOF
@@ -747,6 +771,8 @@ if [ "$SINGLE_MACHINE" = true ]; then
     echo -e "  ${BOLD}Running both init scripts sequentially on ${PLEX_IP_ADDR}...${NC}"
     echo -e "  ${DIM}This takes 5-10 minutes. Streaming output below.${NC}\n"
 
+    # Disable set -e for deploy pipelines — capture exit codes via PIPESTATUS
+    set +e
     echo -e "${BOLD}━━━ SPYGLASS (Plex) ━━━${NC}"
     run_init "$PLEX_IP_ADDR" "Spyglass" "init-machine1-plex.sh" 2>&1 | while IFS= read -r line; do
         echo -e "${BOLD}[SPYGLASS]${NC} $line"
@@ -759,6 +785,7 @@ if [ "$SINGLE_MACHINE" = true ]; then
         echo -e "${BOLD}[PRIVATEER]${NC} $line"
     done
     ARR_RESULT=${PIPESTATUS[0]}
+    set -e
 else
     echo -e "  ${BOLD}Launching both init scripts in parallel...${NC}"
     echo -e "  ${DIM}This takes 2-5 minutes per machine. Streaming output below.${NC}\n"
@@ -771,55 +798,45 @@ else
     ARR_PID=$!
 
     # ===========================================================================
-    header "Phase 7: Live Output"
+    header "Phase 7: Deploy Output"
     # ===========================================================================
 
-    # Wait and dump labeled output
-    (
-        wait "$PLEX_PID" 2>/dev/null
-        PLEX_EXIT=$?
-        echo ""
-        echo -e "${BOLD}━━━ SPYGLASS OUTPUT ━━━${NC}"
-        if [ -f "$PLEX_LOG" ]; then
-            while IFS= read -r line; do
-                echo -e "${BOLD}[SPYGLASS]${NC} $line"
-            done < "$PLEX_LOG"
-        fi
-        if [ "$PLEX_EXIT" -eq 0 ]; then
-            echo -e "${BOLD}[SPYGLASS]${NC} ${GREEN}Deploy complete ✓${NC}"
-        else
-            echo -e "${BOLD}[SPYGLASS]${NC} ${RED}Deploy failed (exit $PLEX_EXIT)${NC}"
-        fi
-    ) &
-    PLEX_OUTPUT_PID=$!
+    echo -e "  ${DIM}Waiting for both deploys to complete...${NC}"
 
-    (
-        wait "$ARR_PID" 2>/dev/null
-        ARR_EXIT=$?
-        echo ""
-        echo -e "${BOLD}━━━ PRIVATEER OUTPUT ━━━${NC}"
-        if [ -f "$ARR_LOG" ]; then
-            while IFS= read -r line; do
-                echo -e "${BOLD}[PRIVATEER]${NC} $line"
-            done < "$ARR_LOG"
-        fi
-        if [ "$ARR_EXIT" -eq 0 ]; then
-            echo -e "${BOLD}[PRIVATEER]${NC} ${GREEN}Deploy complete ✓${NC}"
-        else
-            echo -e "${BOLD}[PRIVATEER]${NC} ${RED}Deploy failed (exit $ARR_EXIT)${NC}"
-        fi
-    ) &
-    ARR_OUTPUT_PID=$!
-
-    # Wait for both output processes
-    wait "$PLEX_OUTPUT_PID" 2>/dev/null || true
-    wait "$ARR_OUTPUT_PID" 2>/dev/null || true
-
-    # Capture exit codes
+    # Wait for both deploy processes and capture exit codes
+    set +e
     wait "$PLEX_PID" 2>/dev/null
     PLEX_RESULT=$?
     wait "$ARR_PID" 2>/dev/null
     ARR_RESULT=$?
+    set -e
+
+    # Dump output sequentially
+    echo ""
+    echo -e "${BOLD}━━━ SPYGLASS OUTPUT ━━━${NC}"
+    if [ -f "$PLEX_LOG" ]; then
+        while IFS= read -r line; do
+            echo -e "${BOLD}[SPYGLASS]${NC} $line"
+        done < "$PLEX_LOG"
+    fi
+    if [ "$PLEX_RESULT" -eq 0 ]; then
+        echo -e "${BOLD}[SPYGLASS]${NC} ${GREEN}Deploy complete ✓${NC}"
+    else
+        echo -e "${BOLD}[SPYGLASS]${NC} ${RED}Deploy failed (exit $PLEX_RESULT)${NC}"
+    fi
+
+    echo ""
+    echo -e "${BOLD}━━━ PRIVATEER OUTPUT ━━━${NC}"
+    if [ -f "$ARR_LOG" ]; then
+        while IFS= read -r line; do
+            echo -e "${BOLD}[PRIVATEER]${NC} $line"
+        done < "$ARR_LOG"
+    fi
+    if [ "$ARR_RESULT" -eq 0 ]; then
+        echo -e "${BOLD}[PRIVATEER]${NC} ${GREEN}Deploy complete ✓${NC}"
+    else
+        echo -e "${BOLD}[PRIVATEER]${NC} ${RED}Deploy failed (exit $ARR_RESULT)${NC}"
+    fi
 fi
 
 # ===========================================================================
@@ -944,6 +961,15 @@ echo -e "    → Bazarr: add subtitle providers (OpenSubtitles.com)"
 echo -e "    → Immich: create admin account, install Android app"
 echo -e "    → Syncthing: set password, pair phone, share folders"
 echo -e "    → SMS Backup: install Android app, schedule daily, add to Syncthing"
+
+if [ "${MIGRATE_LIBRARY:-false}" = "true" ]; then
+    echo ""
+    echo -e "  ${BOLD}Media Migration:${NC}"
+    echo -e "    → Preview:  ssh ${SSH_USER}@${ARR_IP_ADDR} 'cd ${REMOTE_PROJECT_PATH}/machine2-arr && docker compose --profile migration run --rm media-migration'"
+    echo -e "    → Execute:  ssh ${SSH_USER}@${ARR_IP_ADDR} 'cd ${REMOTE_PROJECT_PATH}/machine2-arr && docker compose --profile migration run --rm media-migration execute'"
+    echo -e "    → FileBot:  http://${ARR_IP_ADDR}:5800 (for messy libraries needing smart rename)"
+fi
+
 echo ""
 echo -e "  ${DIM}Project files synced to ${REMOTE_PROJECT_PATH}.${NC}"
 echo -e "  ${DIM}To re-run, SSH in and run the init script directly.${NC}"

@@ -110,15 +110,15 @@ services:
     environment:
       - TZ=${TZ}
       - UN_SONARR_0_URL=http://sonarr:8989
-      - UN_SONARR_0_API_KEY=${SONARR_API_KEY}
+      - UN_SONARR_0_API_KEY=${SONARR_API_KEY:-}
       - UN_SONARR_0_PATHS_0=/downloads
       - UN_SONARR_0_PROTOCOLS=torrent
       - UN_RADARR_0_URL=http://radarr:7878
-      - UN_RADARR_0_API_KEY=${RADARR_API_KEY}
+      - UN_RADARR_0_API_KEY=${RADARR_API_KEY:-}
       - UN_RADARR_0_PATHS_0=/downloads
       - UN_RADARR_0_PROTOCOLS=torrent
       - UN_LIDARR_0_URL=http://lidarr:8686
-      - UN_LIDARR_0_API_KEY=${LIDARR_API_KEY}
+      - UN_LIDARR_0_API_KEY=${LIDARR_API_KEY:-}
       - UN_LIDARR_0_PATHS_0=/downloads
       - UN_LIDARR_0_PROTOCOLS=torrent
     volumes:
@@ -338,6 +338,7 @@ services:
       - ${APPDATA}/filebot/config:/config
       - ${MEDIA_ROOT}:/storage:rw
       - ${DOWNLOADS_ROOT}:/downloads:rw
+      - /mnt/migrate-source:/migrate-source:ro
     networks: [arr-net]
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:5800 || exit 1"]
@@ -390,7 +391,7 @@ services:
     image: alpine:latest
     container_name: download-monitor
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl jq bash > /dev/null 2>&1 && exec bash /scripts/download-monitor.sh"]
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl jq bash coreutils > /dev/null 2>&1 && exec bash /scripts/download-monitor.sh"]
     environment:
       - RADARR_API_KEY=${RADARR_API_KEY:-}
       - SONARR_API_KEY=${SONARR_API_KEY:-}
@@ -529,12 +530,33 @@ services:
       retries: 3
       start_period: 15s
 
+  # ── Media Library Migration (optional — profile-gated) ────────────────────
+  media-migration:
+    image: alpine:latest
+    container_name: media-migration
+    profiles: ["migration"]
+    entrypoint: ["/bin/sh", "-c",
+      "apk add --no-cache rsync bash coreutils jq curl > /dev/null 2>&1 && exec bash /scripts/migrate-library.sh \"$@\"", "--"]
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - RADARR_API_KEY=${RADARR_API_KEY:-}
+      - SONARR_API_KEY=${SONARR_API_KEY:-}
+      - LIDARR_API_KEY=${LIDARR_API_KEY:-}
+      - READARR_API_KEY=${READARR_API_KEY:-}
+    volumes:
+      - ../scripts/migrate-library.sh:/scripts/migrate-library.sh:ro
+      - /mnt/migrate-source:/source:ro
+      - ${MEDIA_ROOT}:/media
+    networks: [arr-net]
+
   # ── Config Backup ─────────────────────────────────────────────────────────
   backup-privateer:
     image: alpine:latest
     container_name: backup-privateer
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl bash > /dev/null 2>&1 && exec bash /scripts/backup.sh"]
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl jq bash > /dev/null 2>&1 && exec bash /scripts/backup.sh"]
     environment:
       - APPDATA=/data
       - BACKUP_DIR=/backups
@@ -554,7 +576,7 @@ services:
     image: alpine:latest
     container_name: maintenance
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl bash coreutils > /dev/null 2>&1 && exec bash /scripts/maintenance.sh"]
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl jq bash coreutils > /dev/null 2>&1 && exec bash /scripts/maintenance.sh"]
     environment:
       - DISK_ALERT_THRESHOLD=85
       - STALE_DOWNLOAD_DAYS=7

@@ -228,6 +228,7 @@ fi
 
 # Always substitute known values (idempotent — no-op if placeholders already replaced)
 if [ -f "$KOMETA_CONF" ]; then
+    PLEX_IP="${PLEX_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
     PLEX_IP="${PLEX_IP:-localhost}"
     [ -n "${PLEX_TOKEN:-}" ] && sed -i "s/YOUR_PLEX_TOKEN/${PLEX_TOKEN}/g" "$KOMETA_CONF"
     [ -n "${TMDB_API_KEY:-}" ] && sed -i "s/YOUR_TMDB_API_KEY/${TMDB_API_KEY}/g" "$KOMETA_CONF"

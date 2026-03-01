@@ -58,6 +58,9 @@ QBIT_PASSWORD="${QBIT_PASSWORD:-adminadmin}"
 NAS_IP="${NAS_IP:-}"
 NAS_MEDIA_EXPORT="${NAS_MEDIA_EXPORT:-/volume1/media}"
 NAS_DOWNLOADS_EXPORT="${NAS_DOWNLOADS_EXPORT:-/volume1/downloads}"
+MIGRATE_LIBRARY="${MIGRATE_LIBRARY:-false}"
+MIGRATE_SOURCE="${MIGRATE_SOURCE:-}"
+MIGRATE_NAS_EXPORT="${MIGRATE_NAS_EXPORT:-}"
 
 # ── OS Portability ─────────────────────────────────────────────────────────
 detect_pkg_manager() {
@@ -167,6 +170,7 @@ mkdir -p "$APPDATA"/dozzle
 mkdir -p "$APPDATA"/backups
 mkdir -p "$APPDATA"/immich/{db,ml-cache,profile,encoded-video}
 mkdir -p "$APPDATA"/syncthing/config
+mkdir -p /mnt/migrate-source
 
 # Set ownership to real user
 if [ "$REAL_USER" != "root" ]; then
@@ -234,9 +238,43 @@ if [ -n "$NAS_IP" ]; then
         mkdir -p "$DOWNLOADS_ROOT"/{torrents/{complete,incomplete},usenet/{complete,incomplete}} 2>/dev/null || true
         log "Download directories ensured on NAS"
     fi
+
+    # --- Migration source mount (if enabled) ---
+    if [ "$MIGRATE_LIBRARY" = "true" ] && [ -n "$MIGRATE_NAS_EXPORT" ]; then
+        info "Configuring migration source NFS mount..."
+        if mountpoint -q /mnt/migrate-source 2>/dev/null; then
+            log "Migration source already mounted at /mnt/migrate-source"
+        else
+            MIGRATE_FSTAB="${NAS_IP}:${MIGRATE_NAS_EXPORT} /mnt/migrate-source nfs ro,hard,intr,rsize=1048576,wsize=1048576,timeo=600,retrans=2 0 0"
+            if ! grep -qF "/mnt/migrate-source" /etc/fstab; then
+                echo "$MIGRATE_FSTAB" >> /etc/fstab
+                log "Added migration source NFS mount to fstab (read-only)"
+            fi
+            mount /mnt/migrate-source && log "Mounted migration source" || warn "Could not mount migration source — check NAS export"
+        fi
+    fi
 else
     warn "NAS_IP not set in .env — skipping NFS mount setup"
     warn "Set NAS_IP, NAS_MEDIA_EXPORT in .env and re-run, or mount manually"
+fi
+
+# --- Migration source bind-mount (local path, no NAS) ---
+if [ "$MIGRATE_LIBRARY" = "true" ] && [ -z "$MIGRATE_NAS_EXPORT" ] && [ -n "$MIGRATE_SOURCE" ]; then
+    if mountpoint -q /mnt/migrate-source 2>/dev/null; then
+        log "Migration source already mounted at /mnt/migrate-source"
+    else
+        info "Bind-mounting local migration source..."
+        if [ -d "$MIGRATE_SOURCE" ]; then
+            MIGRATE_FSTAB="${MIGRATE_SOURCE} /mnt/migrate-source none bind,ro 0 0"
+            if ! grep -qF "/mnt/migrate-source" /etc/fstab; then
+                echo "$MIGRATE_FSTAB" >> /etc/fstab
+                log "Added migration source bind-mount to fstab (read-only)"
+            fi
+            mount /mnt/migrate-source && log "Mounted migration source" || warn "Could not bind-mount $MIGRATE_SOURCE"
+        else
+            warn "Migration source path does not exist: $MIGRATE_SOURCE"
+        fi
+    fi
 fi
 
 # ===========================================================================
@@ -349,7 +387,7 @@ update_env_key() {
 LIVE_KEY=$(get_arr_api_key "Radarr" "$APPDATA/radarr/config/config.xml")
 if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${RADARR_API_KEY:-}" ]; then
     RADARR_API_KEY="$LIVE_KEY"
-    log "Radarr API key: $RADARR_API_KEY"
+    log "Radarr API key: ${RADARR_API_KEY:0:8}..."
     NEED_ENV_UPDATE=true
 elif [ -z "${RADARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
     warn "Could not get Radarr API key — container may still be starting"
@@ -359,7 +397,7 @@ fi
 LIVE_KEY=$(get_arr_api_key "Sonarr" "$APPDATA/sonarr/config/config.xml")
 if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${SONARR_API_KEY:-}" ]; then
     SONARR_API_KEY="$LIVE_KEY"
-    log "Sonarr API key: $SONARR_API_KEY"
+    log "Sonarr API key: ${SONARR_API_KEY:0:8}..."
     NEED_ENV_UPDATE=true
 elif [ -z "${SONARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
     warn "Could not get Sonarr API key — container may still be starting"
@@ -369,7 +407,7 @@ fi
 LIVE_KEY=$(get_arr_api_key "Lidarr" "$APPDATA/lidarr/config/config.xml")
 if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${LIDARR_API_KEY:-}" ]; then
     LIDARR_API_KEY="$LIVE_KEY"
-    log "Lidarr API key: $LIDARR_API_KEY"
+    log "Lidarr API key: ${LIDARR_API_KEY:0:8}..."
     NEED_ENV_UPDATE=true
 elif [ -z "${LIDARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
     warn "Could not get Lidarr API key"
@@ -379,7 +417,7 @@ fi
 LIVE_KEY=$(get_arr_api_key "Prowlarr" "$APPDATA/prowlarr/config/config.xml")
 if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${PROWLARR_API_KEY:-}" ]; then
     PROWLARR_API_KEY="$LIVE_KEY"
-    log "Prowlarr API key: $PROWLARR_API_KEY"
+    log "Prowlarr API key: ${PROWLARR_API_KEY:0:8}..."
     NEED_ENV_UPDATE=true
 elif [ -z "${PROWLARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
     warn "Could not get Prowlarr API key"
@@ -391,7 +429,7 @@ if [ -f "$BAZARR_CONF_DB" ]; then
     LIVE_KEY=$(grep -oP 'apikey:\s*\K\S+' "$BAZARR_CONF_DB" 2>/dev/null || echo "")
     if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${BAZARR_API_KEY:-}" ]; then
         BAZARR_API_KEY="$LIVE_KEY"
-        log "Bazarr API key: $BAZARR_API_KEY"
+        log "Bazarr API key: ${BAZARR_API_KEY:0:8}..."
         NEED_ENV_UPDATE=true
     fi
 fi
@@ -400,7 +438,7 @@ fi
 LIVE_KEY=$(get_arr_api_key "Readarr" "$APPDATA/readarr/config/config.xml")
 if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${READARR_API_KEY:-}" ]; then
     READARR_API_KEY="$LIVE_KEY"
-    log "Readarr API key: $READARR_API_KEY"
+    log "Readarr API key: ${READARR_API_KEY:0:8}..."
     NEED_ENV_UPDATE=true
 elif [ -z "${READARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
     warn "Could not get Readarr API key"
@@ -410,7 +448,7 @@ fi
 LIVE_KEY=$(get_arr_api_key "Whisparr" "$APPDATA/whisparr/config/config.xml")
 if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${WHISPARR_API_KEY:-}" ]; then
     WHISPARR_API_KEY="$LIVE_KEY"
-    log "Whisparr API key: $WHISPARR_API_KEY"
+    log "Whisparr API key: ${WHISPARR_API_KEY:0:8}..."
     NEED_ENV_UPDATE=true
 elif [ -z "${WHISPARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
     warn "Could not get Whisparr API key"
@@ -670,6 +708,32 @@ if [ -n "${PROWLARR_API_KEY:-}" ]; then
             }" > /dev/null 2>&1 && log "  Prowlarr → Lidarr connected" || warn "  Prowlarr → Lidarr failed"
         fi
 
+        # Connect Readarr
+        if [ -n "${READARR_API_KEY:-}" ]; then
+            arr_api "http://${ARR_HOST}:9696/api/v1/applications" "$PROWLARR_API_KEY" POST "{
+                \"name\": \"Readarr\", \"syncLevel\": \"fullSync\",
+                \"implementation\": \"Readarr\", \"configContract\": \"ReadarrSettings\",
+                \"fields\": [
+                    {\"name\": \"prowlarrUrl\", \"value\": \"http://prowlarr:9696\"},
+                    {\"name\": \"baseUrl\", \"value\": \"http://readarr:8787\"},
+                    {\"name\": \"apiKey\", \"value\": \"${READARR_API_KEY}\"}
+                ]
+            }" > /dev/null 2>&1 && log "  Prowlarr → Readarr connected" || warn "  Prowlarr → Readarr failed"
+        fi
+
+        # Connect Whisparr
+        if [ -n "${WHISPARR_API_KEY:-}" ]; then
+            arr_api "http://${ARR_HOST}:9696/api/v1/applications" "$PROWLARR_API_KEY" POST "{
+                \"name\": \"Whisparr\", \"syncLevel\": \"fullSync\",
+                \"implementation\": \"Whisparr\", \"configContract\": \"WhisparrSettings\",
+                \"fields\": [
+                    {\"name\": \"prowlarrUrl\", \"value\": \"http://prowlarr:9696\"},
+                    {\"name\": \"baseUrl\", \"value\": \"http://whisparr:6969\"},
+                    {\"name\": \"apiKey\", \"value\": \"${WHISPARR_API_KEY}\"}
+                ]
+            }" > /dev/null 2>&1 && log "  Prowlarr → Whisparr connected" || warn "  Prowlarr → Whisparr failed"
+        fi
+
         # Add FlareSolverr proxy
         arr_api "http://${ARR_HOST}:9696/api/v1/indexerProxy" "$PROWLARR_API_KEY" POST '{
             "name": "FlareSolverr", "implementation": "FlareSolverr",
@@ -749,7 +813,7 @@ if [ -n "${READARR_API_KEY:-}" ]; then
                     {\"name\": \"port\", \"value\": 8080},
                     {\"name\": \"username\", \"value\": \"admin\"},
                     {\"name\": \"password\", \"value\": \"${QBIT_PASSWORD}\"},
-                    {\"name\": \"musicCategory\", \"value\": \"readarr\"}
+                    {\"name\": \"bookCategory\", \"value\": \"readarr\"}
                 ],
                 \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
             }" > /dev/null 2>&1 && log "  Readarr: download client configured" || true
@@ -1099,7 +1163,7 @@ echo "  │  ✓ Sonarr: root folders, download clients, naming  │"
 echo "  │  ✓ Lidarr: root folder, download client            │"
 echo "  │  ✓ Readarr: root folders, download client          │"
 echo "  │  ✓ Whisparr: root folder, download client          │"
-echo "  │  ✓ Prowlarr → Radarr/Sonarr/Lidarr connected      │"
+echo "  │  ✓ Prowlarr → all *arr apps connected              │"
 echo "  │  ✓ Prowlarr → FlareSolverr proxy added             │"
 echo "  │  ✓ Bazarr → Sonarr/Radarr, forced subs enabled    │"
 echo "  │  ✓ qBittorrent password changed                    │"
@@ -1117,6 +1181,9 @@ echo "  │  ✓ Weekly content digest to Discord               │"
 echo "  │  ✓ Immich photo/video backup (ML on NVMe)        │"
 echo "  │  ✓ Syncthing file sync (phone → NAS)             │"
 echo "  │  ✓ Immich DB backup cron (nightly, 7-day retain) │"
+if [ "$MIGRATE_LIBRARY" = "true" ]; then
+echo "  │  ✓ Migration source mounted (read-only)         │"
+fi
 echo "  └─────────────────────────────────────────────────────┘"
 echo ""
 warn "STILL NEEDS MANUAL SETUP:"
@@ -1153,6 +1220,13 @@ echo "    → Install \"SMS Backup & Restore\" from Play Store"
 echo "    → Schedule daily backups to a local folder"
 echo "    → Add that folder to Syncthing → auto-syncs to NAS"
 echo ""
+if [ "$MIGRATE_LIBRARY" = "true" ]; then
+echo "  Media Migration  →  Source mounted, ready to run"
+echo "    Preview:  docker compose --profile migration run --rm media-migration"
+echo "    Execute:  docker compose --profile migration run --rm media-migration execute"
+echo "    FileBot:  http://localhost:5800 (for messy libraries needing smart rename)"
+echo ""
+fi
 echo "  To re-run post-deploy config after manual steps:"
 echo "    sudo ../scripts/init-machine2-arr.sh"
 echo "    (safe to re-run — skips already-configured items)"

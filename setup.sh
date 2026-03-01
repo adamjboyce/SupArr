@@ -358,6 +358,27 @@ collect_arr_questions() {
 
     ask IMMICH_DB_PASSWORD "Immich database password" "$(openssl rand -hex 12)" "secret"
 
+    header "Media Library Migration (Optional)"
+    echo -e "  ${DIM}Import an existing media library into the *arr folder structure.${NC}"
+    echo -e "  ${DIM}Uses rsync (resumable) with a dry-run preview before copying.${NC}\n"
+
+    MIGRATE_LIBRARY="${MIGRATE_LIBRARY:-false}"
+    MIGRATE_SOURCE="${MIGRATE_SOURCE:-}"
+    MIGRATE_NAS_EXPORT="${MIGRATE_NAS_EXPORT:-}"
+
+    if [ "$MIGRATE_LIBRARY" != "true" ]; then
+        if ask_yn "Have an existing media library to import?" "n"; then
+            MIGRATE_LIBRARY="true"
+            if ask_yn "Is the library on your NAS?" "y"; then
+                ask MIGRATE_NAS_EXPORT "NFS export path for existing library" "/volume1/old-media"
+                validate_path "$MIGRATE_NAS_EXPORT" || { err "Export path must be absolute"; exit 1; }
+            else
+                ask MIGRATE_SOURCE "Local path to existing library" "/mnt/external/media"
+                validate_path "$MIGRATE_SOURCE" || { err "Path must be absolute"; exit 1; }
+            fi
+        fi
+    fi
+
     # API keys — init script populates these automatically
     RADARR_API_KEY="${RADARR_API_KEY:-}"
     SONARR_API_KEY="${SONARR_API_KEY:-}"
@@ -489,6 +510,9 @@ PLEX_TOKEN=${PLEX_TOKEN:-}
 PLEX_IP=${PLEX_IP:-}
 TMDB_API_KEY=${TMDB_API_KEY:-}
 IMMICH_DB_PASSWORD=${IMMICH_DB_PASSWORD:-}
+MIGRATE_LIBRARY=${MIGRATE_LIBRARY:-false}
+MIGRATE_SOURCE=${MIGRATE_SOURCE:-}
+MIGRATE_NAS_EXPORT=${MIGRATE_NAS_EXPORT:-}
 DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
 WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL}
 ENVEOF
@@ -835,6 +859,14 @@ if [ "$ROLE" = "arr" ] || [ "$ROLE" = "both" ]; then
     echo ""
     echo -e "    ${BOLD}SMS Backup${NC}  (Android app — not a server component)"
     echo -e "    ${DIM}Install \"SMS Backup & Restore\", schedule daily, add folder to Syncthing${NC}"
+
+    if [ "${MIGRATE_LIBRARY:-false}" = "true" ]; then
+        echo ""
+        echo -e "    ${BOLD}Media Migration${NC}  →  Source mounted, ready to run"
+        echo -e "    ${DIM}Preview:  docker compose --profile migration run --rm media-migration${NC}"
+        echo -e "    ${DIM}Execute:  docker compose --profile migration run --rm media-migration execute${NC}"
+        echo -e "    ${DIM}FileBot:  http://localhost:5800 (for messy libraries needing smart rename)${NC}"
+    fi
 fi
 
 echo ""

@@ -207,7 +207,7 @@ services:
     image: alpine:latest
     container_name: backup-spyglass
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl bash > /dev/null 2>&1 && exec bash /scripts/backup.sh"]
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl jq bash > /dev/null 2>&1 && exec bash /scripts/backup.sh"]
     environment:
       - APPDATA=/data
       - BACKUP_DIR=/backups

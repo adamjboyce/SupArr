@@ -37,14 +37,16 @@ if [ ${#APPS[@]} -eq 0 ]; then
     exec sleep infinity
 fi
 
-# Notify Discord (fire-and-forget)
+# Notify Discord (fire-and-forget, jq handles JSON escaping)
 notify_discord() {
     local message="$1"
     if [ -z "$DISCORD_WEBHOOK_URL" ]; then return; fi
+    local payload
+    payload=$(jq -n --arg c "$message" --arg u "Download Monitor" \
+        '{username: $u, content: $c}')
     curl -sf -X POST "$DISCORD_WEBHOOK_URL" \
         -H "Content-Type: application/json" \
-        -d "{\"username\": \"Download Monitor\", \"content\": \"$message\"}" \
-        > /dev/null 2>&1 || true
+        -d "$payload" > /dev/null 2>&1 || true
 }
 
 # Calculate age in hours from ISO timestamp
@@ -116,7 +118,7 @@ check_and_clean() {
 
             if [ "$delete_result" = "ok" ]; then
                 removed_count=$((removed_count + 1))
-                removed_titles="${removed_titles}\n- ${title} (${hours}h stalled)"
+                removed_titles+=$'\n'"- ${title} (${hours}h stalled)"
                 log "${name}: removed and blocklisted: ${title}"
             else
                 warn "${name}: failed to remove: ${title}"

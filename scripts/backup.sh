@@ -20,10 +20,12 @@ warn() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [!!] $1"; }
 notify_discord() {
     local message="$1"
     if [ -z "$DISCORD_WEBHOOK_URL" ]; then return; fi
+    local payload
+    payload=$(jq -n --arg c "$message" --arg u "Backup Bot" \
+        '{username: $u, content: $c}')
     curl -sf -X POST "$DISCORD_WEBHOOK_URL" \
         -H "Content-Type: application/json" \
-        -d "{\"username\": \"Backup Bot\", \"content\": \"$message\"}" \
-        > /dev/null 2>&1 || true
+        -d "$payload" > /dev/null 2>&1 || true
 }
 
 run_backup() {
@@ -33,7 +35,7 @@ run_backup() {
     mkdir -p "$BACKUP_DIR"
 
     log "Starting backup of ${APPDATA}..."
-    if tar -czf "$backup_file" -C "$(dirname "$APPDATA")" "$(basename "$APPDATA")" 2>/dev/null; then
+    if tar -czf "$backup_file" --exclude='backups' -C "$(dirname "$APPDATA")" "$(basename "$APPDATA")" 2>/dev/null; then
         local size
         size=$(du -sh "$backup_file" | cut -f1)
         log "Backup complete: ${backup_file} (${size})"
