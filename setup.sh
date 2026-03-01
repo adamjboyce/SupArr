@@ -236,6 +236,8 @@ if [ -n "$NAS_IP" ]; then
     ask NAS_MEDIA_EXPORT "NAS media export path" "/volume1/media"
     if [ "$ROLE" = "arr" ] || [ "$ROLE" = "both" ]; then
         ask NAS_DOWNLOADS_EXPORT "NAS downloads export path" "/volume1/downloads"
+        echo -e "  ${DIM}Optional: separate NFS share for Immich photos + Syncthing backups${NC}"
+        ask NAS_BACKUPS_EXPORT "NAS backups export path (blank to skip)" ""
     fi
 fi
 
@@ -318,8 +320,12 @@ collect_arr_questions() {
         NORD_PASS="${NORD_PASS:-}"
     else
         NORD_VPN_TYPE="openvpn"
-        echo -e "\n  ${DIM}Nord service credentials (NOT your login email/password).${NC}"
-        echo -e "  ${DIM}Find them at: https://my.nordaccount.com/dashboard/nordvpn/manual-configuration/${NC}\n"
+        echo -e "\n  ${BOLD}⚠ These are NOT your NordVPN login email/password!${NC}"
+        echo -e "  ${DIM}NordVPN uses separate 'service credentials' for OpenVPN:${NC}"
+        echo -e "  ${DIM}  1. Log in at https://my.nordaccount.com${NC}"
+        echo -e "  ${DIM}  2. Go to: NordVPN → Manual Setup → OpenVPN/IKEv2${NC}"
+        echo -e "  ${DIM}  3. Copy the service username and password shown there${NC}"
+        echo -e "  ${DIM}  Direct link: https://my.nordaccount.com/dashboard/nordvpn/manual-configuration/service-credentials/${NC}\n"
         ask NORD_USER "Nord service username" ""
         ask NORD_PASS "Nord service password" "" "secret"
         NORD_WIREGUARD_KEY="${NORD_WIREGUARD_KEY:-}"
@@ -386,7 +392,7 @@ collect_arr_questions() {
     LIDARR_API_KEY="${LIDARR_API_KEY:-}"
     PROWLARR_API_KEY="${PROWLARR_API_KEY:-}"
     BAZARR_API_KEY="${BAZARR_API_KEY:-}"
-    READARR_API_KEY="${READARR_API_KEY:-}"
+    BOOKSHELF_API_KEY="${BOOKSHELF_API_KEY:-}"
     WHISPARR_API_KEY="${WHISPARR_API_KEY:-}"
     SABNZBD_API_KEY="${SABNZBD_API_KEY:-}"
 }
@@ -488,6 +494,7 @@ APPDATA=${appdata_val}
 NAS_IP=${NAS_IP}
 NAS_MEDIA_EXPORT=${NAS_MEDIA_EXPORT:-}
 NAS_DOWNLOADS_EXPORT=${NAS_DOWNLOADS_EXPORT:-}
+NAS_BACKUPS_EXPORT=${NAS_BACKUPS_EXPORT:-}
 NORD_VPN_TYPE=${NORD_VPN_TYPE}
 NORD_USER=${NORD_USER:-}
 NORD_PASS=${NORD_PASS:-}
@@ -502,7 +509,7 @@ SONARR_API_KEY=${SONARR_API_KEY}
 LIDARR_API_KEY=${LIDARR_API_KEY}
 PROWLARR_API_KEY=${PROWLARR_API_KEY}
 BAZARR_API_KEY=${BAZARR_API_KEY}
-READARR_API_KEY=${READARR_API_KEY}
+BOOKSHELF_API_KEY=${BOOKSHELF_API_KEY}
 WHISPARR_API_KEY=${WHISPARR_API_KEY}
 SABNZBD_API_KEY=${SABNZBD_API_KEY}
 NOTIFIARR_API_KEY=${NOTIFIARR_API_KEY}
@@ -660,8 +667,15 @@ configure_overseerr() {
         existing=$(curl -sf "${os_url}/settings/radarr" -H "X-Api-Key: ${os_key}" 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
         if [ "${existing:-0}" -eq 0 ]; then
             local prof_id prof_name root_path
-            prof_id=$(curl -sf "http://${arr_host}:7878/api/v3/qualityprofile" -H "X-Api-Key: ${radarr_key}" 2>/dev/null | jq '.[0].id // 1' 2>/dev/null || echo "1")
-            prof_name=$(curl -sf "http://${arr_host}:7878/api/v3/qualityprofile" -H "X-Api-Key: ${radarr_key}" 2>/dev/null | jq -r '.[0].name // "Any"' 2>/dev/null || echo "Any")
+            local radarr_profiles
+            radarr_profiles=$(curl -sf "http://${arr_host}:7878/api/v3/qualityprofile" -H "X-Api-Key: ${radarr_key}" 2>/dev/null || echo "[]")
+            # Prefer TRaSH "HD Bluray + WEB" profile, fall back to first available
+            prof_id=$(echo "$radarr_profiles" | jq '[.[] | select(.name=="HD Bluray + WEB")] | .[0].id // null' 2>/dev/null || echo "null")
+            prof_name=$(echo "$radarr_profiles" | jq -r '[.[] | select(.name=="HD Bluray + WEB")] | .[0].name // null' 2>/dev/null || echo "null")
+            if [ "$prof_id" = "null" ] || [ -z "$prof_id" ]; then
+                prof_id=$(echo "$radarr_profiles" | jq '.[0].id // 1' 2>/dev/null || echo "1")
+                prof_name=$(echo "$radarr_profiles" | jq -r '.[0].name // "Any"' 2>/dev/null || echo "Any")
+            fi
             root_path=$(curl -sf "http://${arr_host}:7878/api/v3/rootfolder" -H "X-Api-Key: ${radarr_key}" 2>/dev/null | jq -r '.[0].path // "/movies"' 2>/dev/null || echo "/movies")
 
             curl -sf -X POST "${os_url}/settings/radarr" \
@@ -697,8 +711,15 @@ configure_overseerr() {
         existing=$(curl -sf "${os_url}/settings/sonarr" -H "X-Api-Key: ${os_key}" 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
         if [ "${existing:-0}" -eq 0 ]; then
             local prof_id prof_name root_path anime_path
-            prof_id=$(curl -sf "http://${arr_host}:8989/api/v3/qualityprofile" -H "X-Api-Key: ${sonarr_key}" 2>/dev/null | jq '.[0].id // 1' 2>/dev/null || echo "1")
-            prof_name=$(curl -sf "http://${arr_host}:8989/api/v3/qualityprofile" -H "X-Api-Key: ${sonarr_key}" 2>/dev/null | jq -r '.[0].name // "Any"' 2>/dev/null || echo "Any")
+            local sonarr_profiles
+            sonarr_profiles=$(curl -sf "http://${arr_host}:8989/api/v3/qualityprofile" -H "X-Api-Key: ${sonarr_key}" 2>/dev/null || echo "[]")
+            # Prefer TRaSH "WEB-1080p" profile, fall back to first available
+            prof_id=$(echo "$sonarr_profiles" | jq '[.[] | select(.name=="WEB-1080p")] | .[0].id // null' 2>/dev/null || echo "null")
+            prof_name=$(echo "$sonarr_profiles" | jq -r '[.[] | select(.name=="WEB-1080p")] | .[0].name // null' 2>/dev/null || echo "null")
+            if [ "$prof_id" = "null" ] || [ -z "$prof_id" ]; then
+                prof_id=$(echo "$sonarr_profiles" | jq '.[0].id // 1' 2>/dev/null || echo "1")
+                prof_name=$(echo "$sonarr_profiles" | jq -r '.[0].name // "Any"' 2>/dev/null || echo "Any")
+            fi
             root_path=$(curl -sf "http://${arr_host}:8989/api/v3/rootfolder" -H "X-Api-Key: ${sonarr_key}" 2>/dev/null | jq -r '.[0].path // "/tv"' 2>/dev/null || echo "/tv")
             anime_path=$(curl -sf "http://${arr_host}:8989/api/v3/rootfolder" -H "X-Api-Key: ${sonarr_key}" 2>/dev/null | jq -r '[.[] | select(.path | test("anime"))] | .[0].path // "/anime"' 2>/dev/null || echo "/anime")
 

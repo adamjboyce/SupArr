@@ -56,14 +56,14 @@ sonarr:
           - 1656adc6d7bb2c8cca6acfb6592db421  # PCOK
           - c67a75ae4a1715f2bb4d492f17f363f4  # PMTP
           - ae58039e1319178e6be73571571d894e  # SHO
-        quality_profiles:
+        assign_scores_to:
           - name: WEB-1080p
 
       - trash_ids:
           - 85c61753df5da1fb2aab6f2a47426b09  # BR-DISK
           - 9c11cd3f07101cdba90a2d81cf0e56b4  # LQ
           - fbcb31d8f2bd3d588b4b69d3c6bf17a1  # 3D
-        quality_profiles:
+        assign_scores_to:
           - name: WEB-1080p
             score: -10000
 
@@ -115,7 +115,7 @@ radarr:
           - 957d0f44b592285f26449575e09b7c11  # Special Edition
           - eecf3a857724171f968a66cb5719e152  # IMAX
           - 9f6cbff8cfe4fbc28f8cee931ddeb1ba  # IMAX Enhanced
-        quality_profiles:
+        assign_scores_to:
           - name: HD Bluray + WEB
 
       - trash_ids:
@@ -127,7 +127,7 @@ radarr:
           - dcf3ec6938fa32445f590a4da84256cd  # DTS-HD MA
           - a570d4a0e56a2874b64e5bfa55202a1b  # FLAC
           - e7c2fcae07cbada050a0c3f68d51a8bf  # DTS-HD HRA
-        quality_profiles:
+        assign_scores_to:
           - name: HD Bluray + WEB
 
       - trash_ids:
@@ -137,6 +137,6 @@ radarr:
           - ae9b7c9ebde1f3bd336a8cbd1ec4c5e5  # No-RlsGroup
           - 7357cf5161efbf8c4d5d0c30b4815ee2  # Obfuscated
           - 5c44f52a8714fdd79bb4d98e2673be1f  # Retags
-        quality_profiles:
+        assign_scores_to:
           - name: HD Bluray + WEB
             score: -10000

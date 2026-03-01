@@ -373,7 +373,222 @@ else
 fi
 
 # ===========================================================================
-header "Phase 8: Summary"
+header "Phase 8: Plex Library Auto-Creation"
+# ===========================================================================
+
+if [ -n "${PLEX_TOKEN:-}" ]; then
+    PLEX_URL="http://localhost:32400"
+
+    info "Waiting for Plex API..."
+    PLEX_READY=false
+    for _ in $(seq 1 30); do
+        if curl -sf -o /dev/null "${PLEX_URL}/identity" -H "X-Plex-Token: ${PLEX_TOKEN}" 2>/dev/null; then
+            PLEX_READY=true; break
+        fi
+        sleep 2
+    done
+
+    if [ "$PLEX_READY" = true ]; then
+        # Get existing library names
+        EXISTING_LIBS=$(curl -sf "${PLEX_URL}/library/sections" \
+            -H "X-Plex-Token: ${PLEX_TOKEN}" \
+            -H "Accept: application/json" 2>/dev/null | \
+            jq -r '.MediaContainer.Directory[].title' 2>/dev/null || echo "")
+
+        create_plex_library() {
+            local name="$1" type="$2" path="$3" agent="$4" scanner="$5"
+            if echo "$EXISTING_LIBS" | grep -qx "$name"; then
+                log "  Library '$name' already exists"
+                return
+            fi
+            curl -sf -X POST "${PLEX_URL}/library/sections" \
+                -H "X-Plex-Token: ${PLEX_TOKEN}" \
+                --data-urlencode "name=${name}" \
+                --data-urlencode "type=${type}" \
+                --data-urlencode "agent=${agent}" \
+                --data-urlencode "scanner=${scanner}" \
+                --data-urlencode "language=en-US" \
+                --data-urlencode "location[0][path]=${path}" > /dev/null 2>&1 && \
+                log "  Library '${name}' created → ${path}" || \
+                warn "  Could not create library '${name}'"
+        }
+
+        info "Creating Plex libraries..."
+        create_plex_library "Movies"        "movie"  "/movies"        "tv.plex.agents.movie"  "Plex Movie"
+        create_plex_library "TV Shows"      "show"   "/tv"            "tv.plex.agents.series" "Plex TV Series"
+        create_plex_library "Anime"         "show"   "/anime"         "tv.plex.agents.series" "Plex TV Series"
+        create_plex_library "Anime Movies"  "movie"  "/anime-movies"  "tv.plex.agents.movie"  "Plex Movie"
+        create_plex_library "Music"         "artist" "/music"         "tv.plex.agents.music"  "Plex Music"
+        create_plex_library "Documentaries" "movie"  "/documentaries" "tv.plex.agents.movie"  "Plex Movie"
+        create_plex_library "Stand-Up"      "movie"  "/stand-up"      "tv.plex.agents.movie"  "Plex Movie"
+        log "Plex libraries configured"
+    else
+        warn "Plex API not ready — libraries must be created manually or re-run this script"
+    fi
+else
+    warn "PLEX_TOKEN not set — skipping library auto-creation"
+    warn "Set PLEX_TOKEN in .env and re-run, or create libraries manually in Plex UI"
+fi
+
+# ===========================================================================
+header "Phase 9: Homepage API Keys"
+# ===========================================================================
+
+HOMEPAGE_SERVICES="$APPDATA/homepage/config/services.yaml"
+if [ -f "$HOMEPAGE_SERVICES" ]; then
+    info "Substituting API keys into Homepage config..."
+    KEYS_SET=false
+
+    # Plex token — from .env
+    if [ -n "${PLEX_TOKEN:-}" ]; then
+        sed -i "s|{{HOMEPAGE_VAR_PLEX_TOKEN}}|${PLEX_TOKEN}|g" "$HOMEPAGE_SERVICES" 2>/dev/null && KEYS_SET=true
+    fi
+
+    # Overseerr API key — from settings.json
+    OS_SETTINGS="$APPDATA/overseerr/config/settings.json"
+    if [ -f "$OS_SETTINGS" ]; then
+        OS_KEY=$(jq -r '.main.apiKey // empty' "$OS_SETTINGS" 2>/dev/null || echo "")
+        if [ -n "$OS_KEY" ]; then
+            sed -i "s|{{HOMEPAGE_VAR_OVERSEERR_KEY}}|${OS_KEY}|g" "$HOMEPAGE_SERVICES" 2>/dev/null && KEYS_SET=true
+        fi
+    fi
+
+    # Tautulli API key — from config.ini
+    TAUTULLI_CONF="$APPDATA/tautulli/config/config.ini"
+    if [ -f "$TAUTULLI_CONF" ]; then
+        TAU_KEY=$(grep -oP 'api_key\s*=\s*\K\S+' "$TAUTULLI_CONF" 2>/dev/null | head -1 || echo "")
+        if [ -n "$TAU_KEY" ]; then
+            sed -i "s|{{HOMEPAGE_VAR_TAUTULLI_KEY}}|${TAU_KEY}|g" "$HOMEPAGE_SERVICES" 2>/dev/null && KEYS_SET=true
+        fi
+    fi
+
+    if [ "$KEYS_SET" = true ]; then
+        log "Homepage API keys substituted"
+    else
+        warn "No API keys available yet — Homepage widgets will show after services initialize"
+    fi
+fi
+
+# ===========================================================================
+header "Phase 10: Tdarr Library Auto-Configuration"
+# ===========================================================================
+
+TDARR_URL="http://localhost:8265"
+
+info "Waiting for Tdarr API..."
+TDARR_READY=false
+for _ in $(seq 1 30); do
+    if curl -sf -o /dev/null "${TDARR_URL}" 2>/dev/null; then
+        TDARR_READY=true; break
+    fi
+    sleep 2
+done
+
+if [ "$TDARR_READY" = true ]; then
+    # Get existing libraries
+    EXISTING_TDARR_LIBS=$(curl -sf -X POST "${TDARR_URL}/api/v2/cruddb" \
+        -H "Content-Type: application/json" \
+        -d '{"data":{"collection":"LibrarySettingsJSONDB","mode":"getAll"}}' 2>/dev/null || echo "{}")
+    EXISTING_LIB_NAMES=$(echo "$EXISTING_TDARR_LIBS" | jq -r '.[].name // empty' 2>/dev/null || echo "")
+
+    # QSV plugin stack — shared across all video libraries
+    TDARR_PLUGINS='[
+        {"pluginID":"Tdarr_Plugin_MC93_Migz1Remux","source":"Community","inputsDB":{"container":"mkv","force_conform":"false"}},
+        {"pluginID":"Tdarr_Plugin_MC93_Migz2CleanTitle","source":"Community","inputsDB":{"clean_audio":"true","clean_subtitles":"true"}},
+        {"pluginID":"Tdarr_Plugin_MC93_Migz3CleanAudio","source":"Community","inputsDB":{"language":"eng,und","commentary":"true","tag_language":"eng","tag_title":"true"}},
+        {"pluginID":"Tdarr_Plugin_MC93_Migz4CleanSubs","source":"Community","inputsDB":{"language":"eng,und","commentary":"true","tag_language":"eng"}},
+        {"pluginID":"Tdarr_Plugin_MC93_Migz5ConvertAudio","source":"Community","inputsDB":{"aac_stereo":"true","downmix":"true"}},
+        {"pluginID":"Tdarr_Plugin_bsh1_Boosh_FFMPEG_QSV_HEVC","source":"Community","inputsDB":{"container":"mkv","encoder":"hevc","target_bitrate_modifier":"0.5","encoder_speedpreset":"slow","enable_10bit":"false","reconvert_hevc":"false"}},
+        {"pluginID":"Tdarr_Plugin_MC93_Migz6OrderStreams","source":"Community","inputsDB":{}}
+    ]'
+
+    # Schedule: 1 AM – 5 PM (hours 1-16), off during prime viewing (5 PM – 1 AM)
+    # 168-element array: 24 hours × 7 days
+    TDARR_SCHEDULE='[false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false]'
+
+    create_tdarr_library() {
+        local name="$1" folder="$2"
+
+        # Skip if library already exists
+        if echo "$EXISTING_LIB_NAMES" | grep -qx "$name"; then
+            log "  Tdarr library '$name' already exists"
+            return
+        fi
+
+        # Generate a unique ID
+        local lib_id
+        lib_id="sup$(echo "${name}" | tr '[:upper:] ' '[:lower:]_' | tr -cd 'a-z0-9_' | head -c 6)$(date +%s | tail -c 4)"
+
+        local payload
+        payload=$(jq -n \
+            --arg id "$lib_id" \
+            --arg name "$name" \
+            --arg folder "$folder" \
+            --argjson plugins "$TDARR_PLUGINS" \
+            --argjson schedule "$TDARR_SCHEDULE" \
+            '{
+                data: {
+                    collection: "LibrarySettingsJSONDB",
+                    mode: "insert",
+                    docID: $id,
+                    obj: {
+                        _id: $id,
+                        name: $name,
+                        folder: $folder,
+                        cache: "/temp",
+                        output: "",
+                        container: ".mkv",
+                        folderWatching: true,
+                        useFsEvents: true,
+                        processLibrary: true,
+                        scanOnStart: true,
+                        scheduledScanFindNew: false,
+                        folderWatchScanInterval: 30,
+                        scannerThreadCount: 2,
+                        pluginCommunity: true,
+                        pluginIDs: $plugins,
+                        schedule: $schedule,
+                        createdAt: (now * 1000 | floor),
+                        priority: 0,
+                        foldersToIgnore: "",
+                        containerFilter: "",
+                        folderToFolderConversion: false,
+                        copyIfConditionsMet: false,
+                        handbrake: false,
+                        ffmpeg: false,
+                        handbrakescan: false,
+                        ffmpegscan: false,
+                        exifToolScan: false,
+                        mediaInfoScan: false,
+                        closedCaptionScan: false,
+                        expanded: true
+                    }
+                }
+            }')
+
+        curl -sf -X POST "${TDARR_URL}/api/v2/cruddb" \
+            -H "Content-Type: application/json" \
+            -d "$payload" > /dev/null 2>&1 && \
+            log "  Tdarr library '${name}' created → ${folder}" || \
+            warn "  Could not create Tdarr library '${name}'"
+    }
+
+    info "Creating Tdarr libraries with QSV plugin stack..."
+    create_tdarr_library "Movies"        "/movies"
+    create_tdarr_library "TV Shows"      "/tv"
+    create_tdarr_library "Anime"         "/anime"
+    create_tdarr_library "Anime Movies"  "/anime-movies"
+    create_tdarr_library "Documentaries" "/documentaries"
+    create_tdarr_library "Stand-Up"      "/stand-up"
+    create_tdarr_library "Concerts"      "/concerts"
+
+    log "Tdarr configured: 7 libraries, QSV HEVC transcode, 1AM-5PM schedule"
+else
+    warn "Tdarr API not ready — configure libraries manually at http://localhost:8265"
+fi
+
+# ===========================================================================
+header "Phase 11: Summary"
 # ===========================================================================
 
 echo ""
@@ -393,6 +608,10 @@ echo "  │  ✓ Plex: hardware transcoding enabled              │"
 echo "  │  ✓ Plex: subtitle mode = foreign audio only        │"
 echo "  │  ✓ Plex: transcoder speed optimized                │"
 echo "  │  ✓ Plex: transcode temp on local SSD               │"
+echo "  │  ✓ Plex: 7 libraries auto-created (if token set) │"
+echo "  │  ✓ Tdarr: 7 libraries with QSV HEVC plugin stack│"
+echo "  │  ✓ Tdarr: schedule 1AM-5PM (off during viewing) │"
+echo "  │  ✓ Homepage: API keys injected for widgets       │"
 echo "  │  ✓ Uptime Kuma monitoring dashboard                │"
 echo "  │  ✓ Docker healthchecks on all services             │"
 echo "  │  ✓ Config backup automation (weekly + rotation)    │"
@@ -402,19 +621,14 @@ warn "STILL NEEDS MANUAL SETUP:"
 echo ""
 echo "  Plex  (http://localhost:32400/web)"
 echo "    → Complete setup wizard (first run only)"
+if [ -z "${PLEX_TOKEN:-}" ]; then
 echo "    → Add libraries pointing to media folders"
+fi
 echo "    → Claim server at https://plex.tv/claim"
 echo ""
 echo "  Tdarr  (http://localhost:8265)"
-echo "    → Add libraries: /movies, /tv, /anime, /documentaries"
-echo "    → Cache path: /temp"
-echo "    → Plugins (add in order):"
-echo "        1. Migz5ConvertContainer  → MKV"
-echo "        2. Migz1FFMPEG            → H.265/QSV"
-echo "        3. Migz3CleanAudio        → keep: eng + original"
-echo "        4. Migz4CleanSubs         → keep: eng + FORCED ⚠️"
-echo "        (Migz4CleanSubs: set to KEEP forced tracks!)"
-echo "    → Schedule: 1 AM – 5 PM (avoid prime viewing)"
+echo "    → Libraries + plugins auto-configured (verify at UI)"
+echo "    → Adjust schedule or plugin settings if needed"
 echo ""
 echo "  Overseerr  (http://localhost:5055)"
 echo "    → Sign in with Plex"

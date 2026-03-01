@@ -232,9 +232,9 @@ services:
       retries: 3
       start_period: 30s
 
-  readarr:
-    image: linuxserver/readarr:0.4.19-nightly  # rolling :nightly tag has broken amd64 manifest
-    container_name: readarr
+  bookshelf:
+    image: ghcr.io/pennydreadful/bookshelf:hardcover
+    container_name: bookshelf
     restart: unless-stopped
     environment:
       - PUID=${PUID}
@@ -242,7 +242,7 @@ services:
       - TZ=${TZ}
     ports: ["8787:8787"]
     volumes:
-      - ${APPDATA}/readarr/config:/config
+      - ${APPDATA}/bookshelf/config:/config
       - ${MEDIA_ROOT}/books:/books
       - ${MEDIA_ROOT}/audiobooks:/audiobooks
       - ${DOWNLOADS_ROOT}:/downloads
@@ -354,7 +354,6 @@ services:
     container_name: notifiarr
     restart: unless-stopped
     environment:
-      - DN_API_KEY=${NOTIFIARR_API_KEY:-}
       - TZ=${TZ}
     ports: ["5454:5454"]
     volumes:
@@ -362,7 +361,7 @@ services:
       - /var/run/utmp:/var/run/utmp
     networks: [arr-net]
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:5454 || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:5454 || exit 1"]
       interval: 60s
       timeout: 10s
       retries: 3
@@ -375,13 +374,14 @@ services:
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
+      - HOMEPAGE_ALLOWED_HOSTS=192.168.1.27:3101,localhost:3000
     ports: ["3101:3000"]
     volumes:
       - ${APPDATA}/homepage/config:/app/config
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [arr-net]
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:3000 || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
       interval: 60s
       timeout: 10s
       retries: 3
@@ -397,7 +397,7 @@ services:
       - RADARR_API_KEY=${RADARR_API_KEY:-}
       - SONARR_API_KEY=${SONARR_API_KEY:-}
       - LIDARR_API_KEY=${LIDARR_API_KEY:-}
-      - READARR_API_KEY=${READARR_API_KEY:-}
+      - BOOKSHELF_API_KEY=${BOOKSHELF_API_KEY:-}
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
       - STALL_THRESHOLD_HOURS=6
       - CHECK_INTERVAL=3600
@@ -413,6 +413,7 @@ services:
     restart: unless-stopped
     environment:
       - TZ=${TZ}
+      - DOCKER_API_VERSION=1.44
       - WATCHTOWER_CLEANUP=true
       - WATCHTOWER_SCHEDULE=0 0 5 * * *
       - WATCHTOWER_NOTIFICATIONS=shoutrrr
@@ -430,11 +431,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [arr-net]
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080 || exit 1"]
-      interval: 60s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
+      test: ["NONE"]
+      disable: true
 
   # ── Phone Backup: Immich ──────────────────────────────────────────────────
   immich-server:
@@ -456,7 +454,7 @@ services:
     ports:
       - "2283:2283"
     volumes:
-      - ${MEDIA_ROOT}/photos/library:/usr/src/app/upload
+      - /mnt/backups/photos:/usr/src/app/upload
       - ${APPDATA}/immich/profile:/usr/src/app/upload/profile
       - ${APPDATA}/immich/encoded-video:/usr/src/app/upload/encoded-video
     networks: [arr-net]
@@ -522,7 +520,7 @@ services:
       - "21027:21027/udp"  # Discovery
     volumes:
       - ${APPDATA}/syncthing/config:/config
-      - ${MEDIA_ROOT}/phone-backup:/data/phone-backup
+      - /mnt/backups/phone-backup:/data/phone-backup
     networks: [arr-net]
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8384 || exit 1"]
@@ -545,7 +543,7 @@ services:
       - RADARR_API_KEY=${RADARR_API_KEY:-}
       - SONARR_API_KEY=${SONARR_API_KEY:-}
       - LIDARR_API_KEY=${LIDARR_API_KEY:-}
-      - READARR_API_KEY=${READARR_API_KEY:-}
+      - BOOKSHELF_API_KEY=${BOOKSHELF_API_KEY:-}
     volumes:
       - ../scripts/migrate-library.sh:/scripts/migrate-library.sh:ro
       - /mnt/migrate-source:/source:ro

@@ -86,6 +86,7 @@ else
     fi
 fi
 NAS_DOWNLOADS_EXPORT="${NAS_DOWNLOADS_EXPORT:-/volume1/downloads}"
+NAS_BACKUPS_EXPORT="${NAS_BACKUPS_EXPORT:-}"
 MIGRATE_LIBRARY="${MIGRATE_LIBRARY:-false}"
 MIGRATE_SOURCE="${MIGRATE_SOURCE:-}"
 MIGRATE_NAS_EXPORT="${MIGRATE_NAS_EXPORT:-}"
@@ -189,7 +190,7 @@ header "Phase 3: Directory Structure"
 
 info "Creating app data directories..."
 mkdir -p "$APPDATA"/{gluetun,qbittorrent/config/qBittorrent,sabnzbd/config,prowlarr/config,flaresolverr}
-mkdir -p "$APPDATA"/{radarr/config,sonarr/config,lidarr/config,readarr/config}
+mkdir -p "$APPDATA"/{radarr/config,sonarr/config,lidarr/config,bookshelf/config}
 mkdir -p "$APPDATA"/{bazarr/config,recyclarr/config,autobrr/config}
 mkdir -p "$APPDATA"/{unpackerr,notifiarr/config,homepage/config}
 mkdir -p "$APPDATA"/{whisparr/config,filebot/config,tailscale/state}
@@ -280,6 +281,28 @@ if [ -n "$NAS_IP" ]; then
             mkdir -p "$DOWNLOADS_ROOT"/{torrents/{complete,incomplete},usenet/{complete,incomplete}} 2>/dev/null || true
         fi
         log "Download directories ensured on NAS"
+    fi
+
+    # --- Backups NFS mount (for Immich/Syncthing on separate share) ---
+    if [ -n "${NAS_BACKUPS_EXPORT:-}" ]; then
+        mkdir -p /mnt/backups
+
+        if mountpoint -q /mnt/backups 2>/dev/null; then
+            log "Backups already mounted at /mnt/backups"
+        else
+            BK_FSTAB_ENTRY="${NAS_IP}:${NAS_BACKUPS_EXPORT} /mnt/backups nfs rw,hard,intr,rsize=1048576,wsize=1048576,timeo=600,retrans=2 0 0"
+            if ! grep -qF "/mnt/backups" /etc/fstab; then
+                echo "$BK_FSTAB_ENTRY" >> /etc/fstab
+                log "Added backups NFS mount to fstab"
+            fi
+            mount /mnt/backups && log "Mounted /mnt/backups" || warn "Could not mount /mnt/backups — check NAS export"
+        fi
+
+        # Create backup subdirectories (use real user for NFS root_squash)
+        _nfs_mkdir "/mnt/backups/photos"
+        _nfs_mkdir "/mnt/backups/photos/library"
+        _nfs_mkdir "/mnt/backups/phone-backup"
+        log "Backups NFS subdirectories ensured"
     fi
 
     # --- Migration source mount (if enabled) ---
@@ -479,14 +502,14 @@ if [ -f "$BAZARR_CONF_DB" ]; then
     fi
 fi
 
-# --- Readarr ---
-LIVE_KEY=$(get_arr_api_key "Readarr" "$APPDATA/readarr/config/config.xml")
-if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${READARR_API_KEY:-}" ]; then
-    READARR_API_KEY="$LIVE_KEY"
-    log "Readarr API key: ${READARR_API_KEY:0:8}..."
+# --- Bookshelf ---
+LIVE_KEY=$(get_arr_api_key "Bookshelf" "$APPDATA/bookshelf/config/config.xml")
+if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${BOOKSHELF_API_KEY:-}" ]; then
+    BOOKSHELF_API_KEY="$LIVE_KEY"
+    log "Bookshelf API key: ${BOOKSHELF_API_KEY:0:8}..."
     NEED_ENV_UPDATE=true
-elif [ -z "${READARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
-    warn "Could not get Readarr API key"
+elif [ -z "${BOOKSHELF_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
+    warn "Could not get Bookshelf API key"
 fi
 
 # --- Whisparr ---
@@ -508,7 +531,7 @@ if [ "$NEED_ENV_UPDATE" = true ]; then
     update_env_key "LIDARR_API_KEY" "$LIDARR_API_KEY" --force
     update_env_key "PROWLARR_API_KEY" "$PROWLARR_API_KEY" --force
     update_env_key "BAZARR_API_KEY" "${BAZARR_API_KEY:-}" --force
-    update_env_key "READARR_API_KEY" "${READARR_API_KEY:-}" --force
+    update_env_key "BOOKSHELF_API_KEY" "${BOOKSHELF_API_KEY:-}" --force
     update_env_key "WHISPARR_API_KEY" "${WHISPARR_API_KEY:-}" --force
 
     # Also update Recyclarr config with real keys
@@ -754,17 +777,17 @@ if [ -n "${PROWLARR_API_KEY:-}" ]; then
             }" > /dev/null 2>&1 && log "  Prowlarr → Lidarr connected" || warn "  Prowlarr → Lidarr failed"
         fi
 
-        # Connect Readarr
-        if [ -n "${READARR_API_KEY:-}" ]; then
+        # Connect Bookshelf (Readarr fork — uses Readarr integration type)
+        if [ -n "${BOOKSHELF_API_KEY:-}" ]; then
             arr_api "http://${ARR_HOST}:9696/api/v1/applications" "$PROWLARR_API_KEY" POST "{
-                \"name\": \"Readarr\", \"syncLevel\": \"fullSync\",
+                \"name\": \"Bookshelf\", \"syncLevel\": \"fullSync\",
                 \"implementation\": \"Readarr\", \"configContract\": \"ReadarrSettings\",
                 \"fields\": [
                     {\"name\": \"prowlarrUrl\", \"value\": \"http://prowlarr:9696\"},
-                    {\"name\": \"baseUrl\", \"value\": \"http://readarr:8787\"},
-                    {\"name\": \"apiKey\", \"value\": \"${READARR_API_KEY}\"}
+                    {\"name\": \"baseUrl\", \"value\": \"http://bookshelf:8787\"},
+                    {\"name\": \"apiKey\", \"value\": \"${BOOKSHELF_API_KEY}\"}
                 ]
-            }" > /dev/null 2>&1 && log "  Prowlarr → Readarr connected" || warn "  Prowlarr → Readarr failed"
+            }" > /dev/null 2>&1 && log "  Prowlarr → Bookshelf connected" || warn "  Prowlarr → Bookshelf failed"
         fi
 
         # Connect Whisparr
@@ -790,6 +813,81 @@ if [ -n "${PROWLARR_API_KEY:-}" ]; then
             ], "tags": []
         }' > /dev/null 2>&1 && log "  FlareSolverr proxy added" || warn "  FlareSolverr may already exist"
 
+        # --- Prowlarr Public Indexers ---
+        info "Adding public indexers to Prowlarr..."
+
+        # Get existing indexers to avoid duplicates
+        EXISTING_INDEXERS=$(arr_api "http://${ARR_HOST}:9696/api/v1/indexer" "$PROWLARR_API_KEY" 2>/dev/null | \
+            jq -r '.[].definitionName // empty' 2>/dev/null || echo "")
+
+        # Create FlareSolverr tag for CloudFlare-protected indexers
+        FLARE_TAG_ID=""
+        EXISTING_TAGS=$(arr_api "http://${ARR_HOST}:9696/api/v1/tag" "$PROWLARR_API_KEY" 2>/dev/null || echo "[]")
+        FLARE_TAG_ID=$(echo "$EXISTING_TAGS" | jq -r '.[] | select(.label=="flaresolverr") | .id' 2>/dev/null || echo "")
+        if [ -z "$FLARE_TAG_ID" ]; then
+            FLARE_TAG_RESPONSE=$(arr_api "http://${ARR_HOST}:9696/api/v1/tag" "$PROWLARR_API_KEY" POST '{"label":"flaresolverr"}' 2>/dev/null || echo "")
+            FLARE_TAG_ID=$(echo "$FLARE_TAG_RESPONSE" | jq -r '.id // empty' 2>/dev/null || echo "")
+            [ -n "$FLARE_TAG_ID" ] && log "  Created 'flaresolverr' tag (id: $FLARE_TAG_ID)"
+        fi
+
+        # Link FlareSolverr proxy to the tag
+        if [ -n "$FLARE_TAG_ID" ]; then
+            FLARE_PROXY=$(arr_api "http://${ARR_HOST}:9696/api/v1/indexerProxy" "$PROWLARR_API_KEY" 2>/dev/null || echo "[]")
+            FLARE_PROXY_ID=$(echo "$FLARE_PROXY" | jq -r '.[] | select(.implementation=="FlareSolverr") | .id' 2>/dev/null || echo "")
+            if [ -n "$FLARE_PROXY_ID" ]; then
+                FLARE_PROXY_JSON=$(echo "$FLARE_PROXY" | jq --argjson tid "$FLARE_TAG_ID" \
+                    '.[] | select(.implementation=="FlareSolverr") | .tags = [$tid]' 2>/dev/null || echo "")
+                if [ -n "$FLARE_PROXY_JSON" ]; then
+                    arr_api "http://${ARR_HOST}:9696/api/v1/indexerProxy/${FLARE_PROXY_ID}" "$PROWLARR_API_KEY" PUT "$FLARE_PROXY_JSON" > /dev/null 2>&1 && \
+                        log "  FlareSolverr proxy linked to tag" || true
+                fi
+            fi
+        fi
+
+        # Helper to add an indexer from its schema definition
+        add_prowlarr_indexer() {
+            local def_name="$1" tags_json="${2:-[]}"
+            if echo "$EXISTING_INDEXERS" | grep -qx "$def_name"; then
+                log "  Indexer '${def_name}' already exists"
+                return
+            fi
+            # Get schema template for this indexer
+            local schemas
+            schemas=$(arr_api "http://${ARR_HOST}:9696/api/v1/indexer/schema" "$PROWLARR_API_KEY" 2>/dev/null || echo "[]")
+            local template
+            template=$(echo "$schemas" | jq --arg n "$def_name" '[.[] | select(.definitionName==$n)] | .[0]' 2>/dev/null || echo "null")
+            if [ "$template" = "null" ] || [ -z "$template" ]; then
+                warn "  No schema template found for '${def_name}'"
+                return
+            fi
+            # Enable it and set tags
+            local payload
+            payload=$(echo "$template" | jq --argjson tags "$tags_json" '.enable = true | .tags = $tags' 2>/dev/null || echo "")
+            if [ -n "$payload" ]; then
+                arr_api "http://${ARR_HOST}:9696/api/v1/indexer" "$PROWLARR_API_KEY" POST "$payload" > /dev/null 2>&1 && \
+                    log "  Indexer '${def_name}' added" || \
+                    warn "  Could not add indexer '${def_name}'"
+            fi
+        }
+
+        # Add public indexers — 1337x needs FlareSolverr, others don't
+        if [ -n "$FLARE_TAG_ID" ]; then
+            add_prowlarr_indexer "1337x" "[$FLARE_TAG_ID]"
+        else
+            add_prowlarr_indexer "1337x" "[]"
+        fi
+        add_prowlarr_indexer "The Pirate Bay" "[]"
+        add_prowlarr_indexer "YTS" "[]"
+        add_prowlarr_indexer "EZTV" "[]"
+        add_prowlarr_indexer "TorrentGalaxy" "[]"
+        add_prowlarr_indexer "Nyaa.si" "[]"
+
+        # Trigger sync to push indexers to all connected *arr apps
+        info "Triggering Prowlarr → *arr indexer sync..."
+        arr_api "http://${ARR_HOST}:9696/api/v1/command" "$PROWLARR_API_KEY" POST \
+            '{"name":"AppIndexerSync"}' > /dev/null 2>&1 && \
+            log "  Indexer sync triggered" || warn "  Could not trigger indexer sync"
+
         log "Prowlarr configured"
     fi
 fi
@@ -802,7 +900,7 @@ docker exec recyclarr recyclarr sync 2>/dev/null && \
     warn "Recyclarr: Sync failed — may need API keys in config. Re-run after updating."
 
 # ===========================================================================
-header "Phase 8b: Readarr, Whisparr, Bazarr & qBit Password"
+header "Phase 8b: Bookshelf, Whisparr, Bazarr & qBit Password"
 # ===========================================================================
 
 # Re-source .env to pick up any newly written keys
@@ -810,48 +908,106 @@ set +H 2>/dev/null || true
 set -a; source "$PROJECT_DIR/.env"; set +a
 
 # --- qBittorrent: change default password ---
+# qBit runs behind Gluetun VPN — must wait for VPN to connect first
 QBIT_PASS="${QBIT_PASSWORD:-adminadmin}"
+QBIT_COOKIE=""
 if [ "$QBIT_PASS" != "adminadmin" ]; then
-    info "Setting qBittorrent password..."
-    # Try custom password first (most likely on re-run)
-    QBIT_COOKIE=$(curl -sf -c - -X POST "http://localhost:8080/api/v2/auth/login" \
-        -d "username=admin&password=${QBIT_PASS}" 2>/dev/null | grep -oP 'SID\s+\K\S+' || echo "")
-
-    if [ -n "$QBIT_COOKIE" ]; then
-        log "qBittorrent: password already set"
-    else
-        # Fall back to default password (first run)
-        QBIT_COOKIE=$(curl -sf -c - -X POST "http://localhost:8080/api/v2/auth/login" \
-            -d "username=admin&password=adminadmin" 2>/dev/null | grep -oP 'SID\s+\K\S+' || echo "")
-        if [ -n "$QBIT_COOKIE" ]; then
-            curl -sf -X POST "http://localhost:8080/api/v2/app/setPreferences" \
-                -b "SID=$QBIT_COOKIE" \
-                -d "json={\"web_ui_password\":\"${QBIT_PASS}\"}" 2>/dev/null && \
-                log "qBittorrent: password changed (user: admin)" || \
-                warn "qBittorrent: could not change password"
-        else
-            warn "qBittorrent: could not log in (container may still be starting)"
+    info "Waiting for qBittorrent API (depends on VPN tunnel)..."
+    QBIT_READY=false
+    for attempt in $(seq 1 45); do
+        if curl -sf -o /dev/null "http://localhost:8080" 2>/dev/null; then
+            QBIT_READY=true; break
         fi
+        [ $((attempt % 10)) -eq 0 ] && info "  Still waiting for qBit (attempt $attempt/45)... VPN may still be connecting"
+        sleep 2
+    done
+
+    if [ "$QBIT_READY" = true ]; then
+        info "Setting qBittorrent password..."
+        # Try custom password first (most likely on re-run)
+        QBIT_COOKIE=$(curl -sf -c - -X POST "http://localhost:8080/api/v2/auth/login" \
+            -d "username=admin&password=${QBIT_PASS}" 2>/dev/null | grep -oP 'SID\s+\K\S+' || echo "")
+
+        if [ -n "$QBIT_COOKIE" ]; then
+            log "qBittorrent: password already set"
+        else
+            # Fall back to default password (first run)
+            QBIT_COOKIE=$(curl -sf -c - -X POST "http://localhost:8080/api/v2/auth/login" \
+                -d "username=admin&password=adminadmin" 2>/dev/null | grep -oP 'SID\s+\K\S+' || echo "")
+            if [ -n "$QBIT_COOKIE" ]; then
+                curl -sf -X POST "http://localhost:8080/api/v2/app/setPreferences" \
+                    -b "SID=$QBIT_COOKIE" \
+                    -d "json={\"web_ui_password\":\"${QBIT_PASS}\"}" 2>/dev/null && \
+                    log "qBittorrent: password changed (user: admin)" || \
+                    warn "qBittorrent: could not change password"
+                # Verify: log in with new password to confirm it stuck
+                sleep 2
+                VERIFY_COOKIE=$(curl -sf -c - -X POST "http://localhost:8080/api/v2/auth/login" \
+                    -d "username=admin&password=${QBIT_PASS}" 2>/dev/null | grep -oP 'SID\s+\K\S+' || echo "")
+                if [ -n "$VERIFY_COOKIE" ]; then
+                    QBIT_COOKIE="$VERIFY_COOKIE"
+                    log "qBittorrent: password verified"
+                else
+                    warn "qBittorrent: password change may not have persisted — verify in UI"
+                fi
+            else
+                warn "qBittorrent: could not log in with default password"
+                warn "  If VPN is not connected, qBit may not be reachable"
+                warn "  Check: docker logs gluetun | tail -20"
+            fi
+        fi
+    else
+        warn "qBittorrent API not reachable after 90s — VPN may not be connected"
+        warn "  Check VPN: docker logs gluetun | tail -20"
+        warn "  After fixing VPN, re-run this script to configure qBit"
     fi
 fi
 
-# --- READARR: root folders + download client ---
-if [ -n "${READARR_API_KEY:-}" ]; then
-    info "Configuring Readarr..."
-    if wait_for_api "Readarr" "http://${ARR_HOST}:8787/api/v1/system/status?apikey=${READARR_API_KEY}"; then
+# --- qBittorrent: queue settings ---
+# Prevent choking with large queues (default max_active_downloads=5 is way too low)
+if [ -n "$QBIT_COOKIE" ]; then
+    info "Setting qBittorrent queue limits..."
+    QBIT_MAX_DL="${QBIT_MAX_DOWNLOADS:-30}"
+    QBIT_MAX_T="${QBIT_MAX_TORRENTS:-50}"
+    QBIT_MAX_UL="${QBIT_MAX_UPLOADS:-15}"
+
+    curl -sf -X POST "http://localhost:8080/api/v2/app/setPreferences" \
+        -b "SID=$QBIT_COOKIE" \
+        -d "json={\"max_active_downloads\":${QBIT_MAX_DL},\"max_active_torrents\":${QBIT_MAX_T},\"max_active_uploads\":${QBIT_MAX_UL},\"queueing_enabled\":true}" 2>/dev/null && \
+        log "qBittorrent: queue limits set (dl:${QBIT_MAX_DL}, total:${QBIT_MAX_T}, ul:${QBIT_MAX_UL})" || \
+        warn "qBittorrent: could not set queue limits"
+elif [ "$QBIT_PASS" = "adminadmin" ]; then
+    # Even with default password, set queue limits if qBit is reachable
+    QBIT_COOKIE=$(curl -sf -c - -X POST "http://localhost:8080/api/v2/auth/login" \
+        -d "username=admin&password=adminadmin" 2>/dev/null | grep -oP 'SID\s+\K\S+' || echo "")
+    if [ -n "$QBIT_COOKIE" ]; then
+        QBIT_MAX_DL="${QBIT_MAX_DOWNLOADS:-30}"
+        QBIT_MAX_T="${QBIT_MAX_TORRENTS:-50}"
+        QBIT_MAX_UL="${QBIT_MAX_UPLOADS:-15}"
+        curl -sf -X POST "http://localhost:8080/api/v2/app/setPreferences" \
+            -b "SID=$QBIT_COOKIE" \
+            -d "json={\"max_active_downloads\":${QBIT_MAX_DL},\"max_active_torrents\":${QBIT_MAX_T},\"max_active_uploads\":${QBIT_MAX_UL},\"queueing_enabled\":true}" 2>/dev/null && \
+            log "qBittorrent: queue limits set (dl:${QBIT_MAX_DL}, total:${QBIT_MAX_T}, ul:${QBIT_MAX_UL})" || true
+    fi
+fi
+
+# --- BOOKSHELF: root folders + download client ---
+if [ -n "${BOOKSHELF_API_KEY:-}" ]; then
+    info "Configuring Bookshelf..."
+    if wait_for_api "Bookshelf" "http://${ARR_HOST}:8787/api/v1/system/status?apikey=${BOOKSHELF_API_KEY}"; then
 
         for folder in books audiobooks; do
-            existing=$(arr_api "http://${ARR_HOST}:8787/api/v1/rootfolder" "$READARR_API_KEY" | grep -c "/${folder}" || true)
+            existing=$(arr_api "http://${ARR_HOST}:8787/api/v1/rootfolder" "$BOOKSHELF_API_KEY" | grep -c "/${folder}" || true)
             if [ "$existing" -eq 0 ]; then
-                arr_api "http://${ARR_HOST}:8787/api/v1/rootfolder" "$READARR_API_KEY" POST \
+                arr_api "http://${ARR_HOST}:8787/api/v1/rootfolder" "$BOOKSHELF_API_KEY" POST \
                     "{\"path\": \"/${folder}\", \"accessible\": true, \"defaultMetadataProfileId\": 1, \"defaultQualityProfileId\": 1}" > /dev/null 2>&1 && \
-                    log "  Readarr: root folder /${folder}" || true
+                    log "  Bookshelf: root folder /${folder}" || true
             fi
         done
 
-        existing_dc=$(arr_api "http://${ARR_HOST}:8787/api/v1/downloadclient" "$READARR_API_KEY" | grep -c "qBittorrent" || true)
+        existing_dc=$(arr_api "http://${ARR_HOST}:8787/api/v1/downloadclient" "$BOOKSHELF_API_KEY" | grep -c "qBittorrent" || true)
         if [ "$existing_dc" -eq 0 ]; then
-            arr_api "http://${ARR_HOST}:8787/api/v1/downloadclient" "$READARR_API_KEY" POST "{
+            arr_api "http://${ARR_HOST}:8787/api/v1/downloadclient" "$BOOKSHELF_API_KEY" POST "{
                 \"enable\": true, \"protocol\": \"torrent\", \"priority\": 1,
                 \"name\": \"qBittorrent\", \"implementation\": \"QBittorrent\",
                 \"configContract\": \"QBittorrentSettings\",
@@ -860,12 +1016,12 @@ if [ -n "${READARR_API_KEY:-}" ]; then
                     {\"name\": \"port\", \"value\": 8080},
                     {\"name\": \"username\", \"value\": \"admin\"},
                     {\"name\": \"password\", \"value\": \"${QBIT_PASSWORD}\"},
-                    {\"name\": \"bookCategory\", \"value\": \"readarr\"}
+                    {\"name\": \"bookCategory\", \"value\": \"bookshelf\"}
                 ],
                 \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
-            }" > /dev/null 2>&1 && log "  Readarr: download client configured" || true
+            }" > /dev/null 2>&1 && log "  Bookshelf: download client configured" || true
         fi
-        log "Readarr configured"
+        log "Bookshelf configured"
     fi
 fi
 
@@ -897,6 +1053,41 @@ if [ -n "${WHISPARR_API_KEY:-}" ]; then
                 \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
             }" > /dev/null 2>&1 && log "  Whisparr: download client configured" || true
         fi
+        # --- Whisparr Indexer Workaround ---
+        # Prowlarr → Whisparr fullSync is broken (known bug). Add indexers as Torznab proxies.
+        if [ -n "${PROWLARR_API_KEY:-}" ]; then
+            info "Adding Torznab indexers to Whisparr (Prowlarr sync workaround)..."
+            WHISPARR_EXISTING_IDX=$(arr_api "http://${ARR_HOST}:6969/api/v3/indexer" "$WHISPARR_API_KEY" 2>/dev/null | \
+                jq -r '.[].name // empty' 2>/dev/null || echo "")
+            PROWLARR_INDEXERS=$(arr_api "http://${ARR_HOST}:9696/api/v1/indexer" "$PROWLARR_API_KEY" 2>/dev/null || echo "[]")
+            PROWLARR_IDX_COUNT=$(echo "$PROWLARR_INDEXERS" | jq 'length' 2>/dev/null || echo "0")
+
+            for i in $(seq 0 $((PROWLARR_IDX_COUNT - 1))); do
+                IDX_NAME=$(echo "$PROWLARR_INDEXERS" | jq -r ".[$i].name" 2>/dev/null || echo "")
+                IDX_ID=$(echo "$PROWLARR_INDEXERS" | jq -r ".[$i].id" 2>/dev/null || echo "")
+                [ -z "$IDX_NAME" ] || [ -z "$IDX_ID" ] && continue
+
+                if echo "$WHISPARR_EXISTING_IDX" | grep -qx "$IDX_NAME"; then
+                    continue
+                fi
+
+                arr_api "http://${ARR_HOST}:6969/api/v3/indexer" "$WHISPARR_API_KEY" POST "{
+                    \"name\": \"${IDX_NAME}\",
+                    \"implementation\": \"Torznab\",
+                    \"configContract\": \"TorznabSettings\",
+                    \"enable\": true,
+                    \"protocol\": \"torrent\",
+                    \"fields\": [
+                        {\"name\": \"baseUrl\", \"value\": \"http://prowlarr:9696/${IDX_ID}/\"},
+                        {\"name\": \"apiPath\", \"value\": \"/api\"},
+                        {\"name\": \"apiKey\", \"value\": \"${PROWLARR_API_KEY}\"},
+                        {\"name\": \"categories\", \"value\": [6000, 6010, 6020, 6030, 6040, 6050, 6060, 6070, 6080, 6090]}
+                    ]
+                }" > /dev/null 2>&1 && \
+                    log "  Whisparr: Torznab '${IDX_NAME}' added" || true
+            done
+        fi
+
         log "Whisparr configured"
     fi
 fi
@@ -946,6 +1137,37 @@ else
     warn "Bazarr: no API key yet — configure manually after restart"
 fi
 
+# --- Notifiarr: write API key to config file (not env var) ---
+# Empty DN_API_KEY env var was overriding config file. Now we write directly to config.
+if [ -n "${NOTIFIARR_API_KEY:-}" ]; then
+    NOTIFIARR_CONF="$APPDATA/notifiarr/config/notifiarr.conf"
+    if [ -f "$NOTIFIARR_CONF" ]; then
+        # Update existing config
+        if grep -q "^api_key" "$NOTIFIARR_CONF"; then
+            sed -i "s|^api_key.*|api_key = \"${NOTIFIARR_API_KEY}\"|" "$NOTIFIARR_CONF"
+        else
+            echo "api_key = \"${NOTIFIARR_API_KEY}\"" >> "$NOTIFIARR_CONF"
+        fi
+        log "Notifiarr: API key written to config file"
+    else
+        # Create minimal config
+        mkdir -p "$(dirname "$NOTIFIARR_CONF")"
+        cat > "$NOTIFIARR_CONF" <<NEOF
+## Notifiarr Client Configuration
+## API key from https://notifiarr.com
+api_key = "${NOTIFIARR_API_KEY}"
+NEOF
+        log "Notifiarr: config file created with API key"
+    fi
+    # Recreate container to pick up new config
+    cd "$PROJECT_DIR"
+    if [ "$REAL_USER" != "root" ] && id -nG "$REAL_USER" | grep -qw docker; then
+        sudo -u "$REAL_USER" docker compose up -d notifiarr 2>/dev/null || true
+    else
+        docker compose up -d notifiarr 2>/dev/null || true
+    fi
+fi
+
 # --- Update download client passwords across all *arr apps ---
 # (Phase 8a configured with $QBIT_PASSWORD but qBit itself just got its password changed)
 if [ "${QBIT_PASS:-adminadmin}" != "adminadmin" ]; then
@@ -957,7 +1179,7 @@ if [ "${QBIT_PASS:-adminadmin}" != "adminadmin" ]; then
             7878) local_key="${RADARR_API_KEY:-}"; api_ver="v3" ;;
             8989) local_key="${SONARR_API_KEY:-}"; api_ver="v3" ;;
             8686) local_key="${LIDARR_API_KEY:-}"; api_ver="v1" ;;
-            8787) local_key="${READARR_API_KEY:-}"; api_ver="v1" ;;
+            8787) local_key="${BOOKSHELF_API_KEY:-}"; api_ver="v1" ;;
             6969) local_key="${WHISPARR_API_KEY:-}"; api_ver="v3" ;;
         esac
         if [ -n "$local_key" ]; then
@@ -1003,7 +1225,7 @@ info "Enabling auto-redownload on failure..."
 enable_auto_redownload "Radarr"  "$ARR_HOST" 7878 "v3" "${RADARR_API_KEY:-}"
 enable_auto_redownload "Sonarr"  "$ARR_HOST" 8989 "v3" "${SONARR_API_KEY:-}"
 enable_auto_redownload "Lidarr"  "$ARR_HOST" 8686 "v1" "${LIDARR_API_KEY:-}"
-enable_auto_redownload "Readarr" "$ARR_HOST" 8787 "v1" "${READARR_API_KEY:-}"
+enable_auto_redownload "Bookshelf" "$ARR_HOST" 8787 "v1" "${BOOKSHELF_API_KEY:-}"
 enable_auto_redownload "Whisparr" "$ARR_HOST" 6969 "v3" "${WHISPARR_API_KEY:-}"
 
 # --- Discord notifications for all *arr apps ---
@@ -1047,7 +1269,7 @@ if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
     add_discord_notification "Radarr"   "$ARR_HOST" 7878 "v3" "${RADARR_API_KEY:-}"   "Radarr"
     add_discord_notification "Sonarr"   "$ARR_HOST" 8989 "v3" "${SONARR_API_KEY:-}"   "Sonarr"
     add_discord_notification "Lidarr"   "$ARR_HOST" 8686 "v1" "${LIDARR_API_KEY:-}"   "Lidarr"
-    add_discord_notification "Readarr"  "$ARR_HOST" 8787 "v1" "${READARR_API_KEY:-}"  "Readarr"
+    add_discord_notification "Bookshelf" "$ARR_HOST" 8787 "v1" "${BOOKSHELF_API_KEY:-}" "Bookshelf"
     add_discord_notification "Prowlarr" "$ARR_HOST" 9696 "v1" "${PROWLARR_API_KEY:-}" "Prowlarr"
 fi
 
@@ -1169,7 +1391,7 @@ if [ -n "${PLEX_TOKEN:-}" ] && [ -n "${PLEX_IP:-}" ]; then
     add_plex_notification "Radarr"  "$ARR_HOST" 7878 "v3" "${RADARR_API_KEY:-}"
     add_plex_notification "Sonarr"  "$ARR_HOST" 8989 "v3" "${SONARR_API_KEY:-}"
     add_plex_notification "Lidarr"  "$ARR_HOST" 8686 "v1" "${LIDARR_API_KEY:-}"
-    add_plex_notification "Readarr" "$ARR_HOST" 8787 "v1" "${READARR_API_KEY:-}"
+    add_plex_notification "Bookshelf" "$ARR_HOST" 8787 "v1" "${BOOKSHELF_API_KEY:-}"
 fi
 
 # ===========================================================================
@@ -1208,12 +1430,16 @@ echo "  │  ✓ API keys collected & saved to .env              │"
 echo "  │  ✓ Radarr: root folders, download clients, naming  │"
 echo "  │  ✓ Sonarr: root folders, download clients, naming  │"
 echo "  │  ✓ Lidarr: root folder, download client            │"
-echo "  │  ✓ Readarr: root folders, download client          │"
+echo "  │  ✓ Bookshelf: root folders, download client         │"
 echo "  │  ✓ Whisparr: root folder, download client          │"
 echo "  │  ✓ Prowlarr → all *arr apps connected              │"
 echo "  │  ✓ Prowlarr → FlareSolverr proxy added             │"
+echo "  │  ✓ Prowlarr: 6 public indexers auto-added         │"
+echo "  │  ✓ Whisparr: Torznab indexers (Prowlarr proxy)    │"
 echo "  │  ✓ Bazarr → Sonarr/Radarr, forced subs enabled    │"
-echo "  │  ✓ qBittorrent password changed                    │"
+echo "  │  ✓ qBittorrent password changed + verified         │"
+echo "  │  ✓ qBittorrent queue limits configured             │"
+echo "  │  ✓ Notifiarr API key in config (not env var)      │"
 echo "  │  ✓ Download client passwords synced                │"
 echo "  │  ✓ Recyclarr TRaSH quality profiles synced         │"
 echo "  │  ✓ Auto-redownload on failure enabled              │"
@@ -1236,7 +1462,8 @@ echo ""
 warn "STILL NEEDS MANUAL SETUP:"
 echo ""
 echo "  Prowlarr  (http://localhost:9696)"
-echo "    → Add your actual indexers (credentials required)"
+echo "    → Public indexers auto-added (1337x, TPB, YTS, EZTV, TorrentGalaxy, Nyaa)"
+echo "    → Add private indexers if you have them (credentials required)"
 echo ""
 echo "  SABnzbd  (http://localhost:8085)"
 echo "    → Run setup wizard, add Usenet server credentials"

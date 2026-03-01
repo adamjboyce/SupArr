@@ -242,9 +242,12 @@ ask TZ "Timezone" "America/Chicago"
 if [ -n "$NAS_IP" ]; then
     ask NAS_MEDIA_EXPORT "NAS media export path" "/volume1/media"
     ask NAS_DOWNLOADS_EXPORT "NAS downloads export path" "/volume1/downloads"
+    echo -e "  ${DIM}Optional: separate NFS share for Immich photos + Syncthing backups${NC}"
+    ask NAS_BACKUPS_EXPORT "NAS backups export path (blank to skip)" ""
 else
     NAS_MEDIA_EXPORT=""
     NAS_DOWNLOADS_EXPORT=""
+    NAS_BACKUPS_EXPORT=""
 fi
 
 ask LOCAL_SUBNET "Local network subnet" "192.168.1.0/24"
@@ -332,8 +335,12 @@ if [ "$vpn_choice" = "2" ]; then
     NORD_PASS=""
 else
     NORD_VPN_TYPE="openvpn"
-    echo -e "\n  ${DIM}Nord service credentials (NOT your login).${NC}"
-    echo -e "  ${DIM}Find at: https://my.nordaccount.com/dashboard/nordvpn/manual-configuration/${NC}\n"
+    echo -e "\n  ${BOLD}⚠ These are NOT your NordVPN login email/password!${NC}"
+    echo -e "  ${DIM}NordVPN uses separate 'service credentials' for OpenVPN:${NC}"
+    echo -e "  ${DIM}  1. Log in at https://my.nordaccount.com${NC}"
+    echo -e "  ${DIM}  2. Go to: NordVPN → Manual Setup → OpenVPN/IKEv2${NC}"
+    echo -e "  ${DIM}  3. Copy the service username and password shown there${NC}"
+    echo -e "  ${DIM}  Direct link: https://my.nordaccount.com/dashboard/nordvpn/manual-configuration/service-credentials/${NC}\n"
     ask NORD_USER "Nord service username" ""
     ask NORD_PASS "Nord service password" "" "secret"
     NORD_WIREGUARD_KEY=""
@@ -583,6 +590,7 @@ APPDATA='${ARR_APPDATA}'
 NAS_IP='${NAS_IP}'
 NAS_MEDIA_EXPORT='${NAS_MEDIA_EXPORT}'
 NAS_DOWNLOADS_EXPORT='${NAS_DOWNLOADS_EXPORT}'
+NAS_BACKUPS_EXPORT='${NAS_BACKUPS_EXPORT}'
 NORD_VPN_TYPE='${NORD_VPN_TYPE}'
 NORD_USER='${NORD_USER}'
 NORD_PASS='${NORD_PASS}'
@@ -597,7 +605,7 @@ SONARR_API_KEY=
 LIDARR_API_KEY=
 PROWLARR_API_KEY=
 BAZARR_API_KEY=
-READARR_API_KEY=
+BOOKSHELF_API_KEY=
 WHISPARR_API_KEY=
 SABNZBD_API_KEY=
 NOTIFIARR_API_KEY='${NOTIFIARR_API_KEY}'
@@ -616,6 +624,46 @@ ENVEOF
 log "Spyglass .env generated"
 log "Privateer .env generated"
 
+# --- Merge remote API keys into local .env files ---
+# On re-deploy, init script may have discovered API keys and written them to the
+# remote .env. Our freshly generated .env has those fields empty. Before we overwrite,
+# read the remote values and preserve any populated API keys.
+merge_remote_env_keys() {
+    local host="$1" remote_env_path="$2" local_env_file="$3"
+    local api_key_fields="RADARR_API_KEY SONARR_API_KEY LIDARR_API_KEY PROWLARR_API_KEY BAZARR_API_KEY BOOKSHELF_API_KEY WHISPARR_API_KEY SABNZBD_API_KEY"
+
+    # Try to read existing remote .env
+    local remote_env
+    # shellcheck disable=SC2086
+    remote_env=$($SSH_CMD "${SSH_USER}@${host}" "cat '${remote_env_path}' 2>/dev/null" 2>/dev/null || echo "")
+    if [ -z "$remote_env" ]; then
+        return  # No remote .env exists yet — nothing to merge
+    fi
+
+    local merged=0
+    for key in $api_key_fields; do
+        # Check if local .env has this key empty
+        local local_val
+        local_val=$(grep "^${key}=" "$local_env_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d "'" || echo "")
+        if [ -n "$local_val" ]; then
+            continue  # Local already has a value — keep it
+        fi
+
+        # Check if remote has a value
+        local remote_val
+        remote_val=$(echo "$remote_env" | grep "^${key}=" | head -1 | cut -d= -f2- | tr -d "'" || echo "")
+        if [ -n "$remote_val" ]; then
+            # Preserve remote value in local .env file
+            sed -i "s|^${key}=.*|${key}='${remote_val}'|" "$local_env_file"
+            merged=$((merged + 1))
+        fi
+    done
+
+    if [ "$merged" -gt 0 ]; then
+        log "  Preserved $merged API key(s) from remote ${remote_env_path}"
+    fi
+}
+
 # ===========================================================================
 header "Phase 5: Sync Project Files"
 # ===========================================================================
@@ -623,6 +671,10 @@ header "Phase 5: Sync Project Files"
 sync_to_target() {
     local host="$1" label="$2"
     info "Syncing project files to ${label} (${host}:${REMOTE_PROJECT_PATH})..."
+
+    # Merge API keys from remote before overwriting
+    merge_remote_env_keys "$host" "${REMOTE_PROJECT_PATH}/machine1-plex/.env" "$PLEX_ENV_FILE"
+    merge_remote_env_keys "$host" "${REMOTE_PROJECT_PATH}/machine2-arr/.env" "$ARR_ENV_FILE"
 
     # Determine if we need sudo on the remote
     local sudo_prefix=""
@@ -793,8 +845,15 @@ configure_overseerr_remote() {
         existing=$(curl -sf "${os_url}/settings/radarr" -H "X-Api-Key: ${os_key}" 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
         if [ "${existing:-0}" -eq 0 ]; then
             local prof_id prof_name root_path
-            prof_id=$(curl -sf "http://${arr_host}:7878/api/v3/qualityprofile" -H "X-Api-Key: ${radarr_key}" 2>/dev/null | jq '.[0].id // 1' 2>/dev/null || echo "1")
-            prof_name=$(curl -sf "http://${arr_host}:7878/api/v3/qualityprofile" -H "X-Api-Key: ${radarr_key}" 2>/dev/null | jq -r '.[0].name // "Any"' 2>/dev/null || echo "Any")
+            local radarr_profiles
+            radarr_profiles=$(curl -sf "http://${arr_host}:7878/api/v3/qualityprofile" -H "X-Api-Key: ${radarr_key}" 2>/dev/null || echo "[]")
+            # Prefer TRaSH "HD Bluray + WEB" profile, fall back to first available
+            prof_id=$(echo "$radarr_profiles" | jq '[.[] | select(.name=="HD Bluray + WEB")] | .[0].id // null' 2>/dev/null || echo "null")
+            prof_name=$(echo "$radarr_profiles" | jq -r '[.[] | select(.name=="HD Bluray + WEB")] | .[0].name // null' 2>/dev/null || echo "null")
+            if [ "$prof_id" = "null" ] || [ -z "$prof_id" ]; then
+                prof_id=$(echo "$radarr_profiles" | jq '.[0].id // 1' 2>/dev/null || echo "1")
+                prof_name=$(echo "$radarr_profiles" | jq -r '.[0].name // "Any"' 2>/dev/null || echo "Any")
+            fi
             root_path=$(curl -sf "http://${arr_host}:7878/api/v3/rootfolder" -H "X-Api-Key: ${radarr_key}" 2>/dev/null | jq -r '.[0].path // "/movies"' 2>/dev/null || echo "/movies")
 
             curl -sf -X POST "${os_url}/settings/radarr" \
@@ -830,8 +889,15 @@ configure_overseerr_remote() {
         existing=$(curl -sf "${os_url}/settings/sonarr" -H "X-Api-Key: ${os_key}" 2>/dev/null | jq 'length' 2>/dev/null || echo "0")
         if [ "${existing:-0}" -eq 0 ]; then
             local prof_id prof_name root_path anime_path
-            prof_id=$(curl -sf "http://${arr_host}:8989/api/v3/qualityprofile" -H "X-Api-Key: ${sonarr_key}" 2>/dev/null | jq '.[0].id // 1' 2>/dev/null || echo "1")
-            prof_name=$(curl -sf "http://${arr_host}:8989/api/v3/qualityprofile" -H "X-Api-Key: ${sonarr_key}" 2>/dev/null | jq -r '.[0].name // "Any"' 2>/dev/null || echo "Any")
+            local sonarr_profiles
+            sonarr_profiles=$(curl -sf "http://${arr_host}:8989/api/v3/qualityprofile" -H "X-Api-Key: ${sonarr_key}" 2>/dev/null || echo "[]")
+            # Prefer TRaSH "WEB-1080p" profile, fall back to first available
+            prof_id=$(echo "$sonarr_profiles" | jq '[.[] | select(.name=="WEB-1080p")] | .[0].id // null' 2>/dev/null || echo "null")
+            prof_name=$(echo "$sonarr_profiles" | jq -r '[.[] | select(.name=="WEB-1080p")] | .[0].name // null' 2>/dev/null || echo "null")
+            if [ "$prof_id" = "null" ] || [ -z "$prof_id" ]; then
+                prof_id=$(echo "$sonarr_profiles" | jq '.[0].id // 1' 2>/dev/null || echo "1")
+                prof_name=$(echo "$sonarr_profiles" | jq -r '.[0].name // "Any"' 2>/dev/null || echo "Any")
+            fi
             root_path=$(curl -sf "http://${arr_host}:8989/api/v3/rootfolder" -H "X-Api-Key: ${sonarr_key}" 2>/dev/null | jq -r '.[0].path // "/tv"' 2>/dev/null || echo "/tv")
             anime_path=$(curl -sf "http://${arr_host}:8989/api/v3/rootfolder" -H "X-Api-Key: ${sonarr_key}" 2>/dev/null | jq -r '[.[] | select(.path | test("anime"))] | .[0].path // "/anime"' 2>/dev/null || echo "/anime")
 
@@ -1022,7 +1088,7 @@ echo -e "  ${BOLD}Privateer — *arr (${ARR_IP_ADDR}):${NC}"
 echo -e "    Radarr      → http://${ARR_IP_ADDR}:7878"
 echo -e "    Sonarr      → http://${ARR_IP_ADDR}:8989"
 echo -e "    Lidarr      → http://${ARR_IP_ADDR}:8686"
-echo -e "    Readarr     → http://${ARR_IP_ADDR}:8787"
+echo -e "    Bookshelf   → http://${ARR_IP_ADDR}:8787"
 echo -e "    Whisparr    → http://${ARR_IP_ADDR}:6969"
 echo -e "    Prowlarr    → http://${ARR_IP_ADDR}:9696"
 echo -e "    Bazarr      → http://${ARR_IP_ADDR}:6767"

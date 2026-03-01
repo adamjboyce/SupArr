@@ -159,6 +159,7 @@ services:
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
+      - HOMEPAGE_ALLOWED_HOSTS=192.168.1.104:3100,localhost:3000
     ports:
       - "3100:3000"
     volumes:
@@ -166,7 +167,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [media-net]
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:3000 || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
       interval: 60s
       timeout: 10s
       retries: 3
@@ -178,6 +179,7 @@ services:
     restart: unless-stopped
     environment:
       - TZ=${TZ}
+      - DOCKER_API_VERSION=1.44
       - WATCHTOWER_CLEANUP=true
       - WATCHTOWER_SCHEDULE=0 0 5 * * *
       - WATCHTOWER_NOTIFICATIONS=shoutrrr

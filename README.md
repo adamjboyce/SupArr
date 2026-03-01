@@ -67,7 +67,7 @@ All scripts are **re-run safe** — skip already-configured items on re-run.
 - Radarr: root folders (movies, docs, stand-up, concerts, anime-movies), qBit + SABnzbd download clients, naming conventions
 - Sonarr: root folders (tv, anime), download clients, naming
 - Lidarr: root folder (music), download client
-- Readarr: root folders (books, audiobooks), download client
+- Bookshelf: root folders (books, audiobooks), download client
 - Whisparr: root folder (adult), download client
 - Prowlarr → Radarr/Sonarr/Lidarr connections established
 - Prowlarr → FlareSolverr proxy added
@@ -79,7 +79,7 @@ All scripts are **re-run safe** — skip already-configured items on re-run.
 - **Discord notifications** for all *arr apps (grab, import, health issues) — if webhook configured
 - **Download health monitor** — detects and removes stalled torrents, auto-searches replacements
 - **Import lists** — Trakt Popular/Trending + TMDb Popular auto-configured for Radarr/Sonarr (if tokens provided)
-- **Plex Connect** — library scan notification on import for Radarr/Sonarr/Lidarr/Readarr (if Plex token provided)
+- **Plex Connect** — library scan notification on import for Radarr/Sonarr/Lidarr/Bookshelf (if Plex token provided)
 - **Config backup** — weekly tar+gzip with 7-day rotation + Discord notification
 - **Maintenance robot** — daily disk space alerts, stale download cleanup, empty directory cleanup
 - **Weekly digest** — summarizes recently imported content to Discord
@@ -141,7 +141,7 @@ Both scripts print a summary. The main items:
 
 ### Discord Notifications
 Provide a Discord webhook URL during setup. One URL covers everything:
-- **\*arr apps** (Radarr, Sonarr, Lidarr, Readarr, Prowlarr): grab started, import complete, upgrades, health issues
+- **\*arr apps** (Radarr, Sonarr, Lidarr, Bookshelf, Prowlarr): grab started, import complete, upgrades, health issues
 - **Watchtower** (both machines): container image updates (auto-derived shoutrrr format)
 - **Download monitor**: stalled torrent removal alerts
 
@@ -183,7 +183,7 @@ All import lists auto-search on add, so new trending content gets grabbed automa
 Overseerr's Plex Watchlist sync is auto-enabled. Add something to your Plex Watchlist from any device → Overseerr picks it up → sends to Radarr/Sonarr → downloads automatically.
 
 ### Plex Connect (Library Scan on Import)
-When *arr apps finish importing content, they notify Plex to scan the library immediately. No more waiting for scheduled scans — new content appears in Plex within seconds of import completing. Configured for Radarr, Sonarr, Lidarr, and Readarr.
+When *arr apps finish importing content, they notify Plex to scan the library immediately. No more waiting for scheduled scans — new content appears in Plex within seconds of import completing. Configured for Radarr, Sonarr, Lidarr, and Bookshelf.
 
 ## Kometa — Library Aesthetics
 
@@ -294,7 +294,7 @@ Useful re-run scenarios:
   │ Kometa (aesthetics)      │            │   └── SABnzbd (masked)      │
   │ Overseerr (requests)     │            │ Prowlarr + FlareSolverr     │
   │ Tautulli (analytics)     │            │ Radarr, Sonarr, Lidarr      │
-  │ Uptime Kuma (monitoring) │            │ Readarr, Bazarr, Whisparr   │
+  │ Uptime Kuma (monitoring) │            │ Bookshelf, Bazarr, Whisparr │
   │ Homepage (:3100)         │            │ Recyclarr, Autobrr, FileBot │
   │ Tailscale (remote)       │            │ Unpackerr, Notifiarr        │
   │ Backup (weekly)          │            │ Download Monitor (health)    │
@@ -375,8 +375,8 @@ media-stack-final/
 | qBittorrent seed ratio | Pre-seeded config | 2.0 ratio / 7 day max |
 | Recyclarr profiles | Config template | TRaSH Guide HD Bluray + WEB / WEB-1080p |
 | VPN kill switch | Gluetun default | Automatic — no leak possible |
-| Download categories | API automated | radarr, sonarr, lidarr, readarr, whisparr |
-| Readarr root folders | API automated | /books, /audiobooks |
+| Download categories | API automated | radarr, sonarr, lidarr, bookshelf, whisparr |
+| Bookshelf root folders | API automated | /books, /audiobooks |
 | Whisparr root folder | API automated | /adult |
 | Auto-redownload | API automated | Failed downloads trigger automatic re-search |
 | Discord notifications | API automated | All *arr apps → grab, import, health events |

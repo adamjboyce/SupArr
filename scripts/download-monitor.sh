@@ -9,7 +9,7 @@
 #   STALL_THRESHOLD_HOURS  — hours before a warning item is considered stalled (default: 6)
 #   CHECK_INTERVAL         — seconds between checks (default: 3600 = 1 hour)
 #   DISCORD_WEBHOOK_URL    — optional Discord webhook for notifications
-#   RADARR_API_KEY, SONARR_API_KEY, LIDARR_API_KEY, READARR_API_KEY — app keys
+#   RADARR_API_KEY, SONARR_API_KEY, LIDARR_API_KEY, BOOKSHELF_API_KEY — app keys
 #
 # Requires: curl, jq, bash
 # =============================================================================
@@ -30,7 +30,7 @@ declare -a APPS=()
 [ -n "${RADARR_API_KEY:-}" ]  && APPS+=("Radarr:radarr:7878:v3:${RADARR_API_KEY}")
 [ -n "${SONARR_API_KEY:-}" ]  && APPS+=("Sonarr:sonarr:8989:v3:${SONARR_API_KEY}")
 [ -n "${LIDARR_API_KEY:-}" ]  && APPS+=("Lidarr:lidarr:8686:v1:${LIDARR_API_KEY}")
-[ -n "${READARR_API_KEY:-}" ] && APPS+=("Readarr:readarr:8787:v1:${READARR_API_KEY}")
+[ -n "${BOOKSHELF_API_KEY:-}" ] && APPS+=("Bookshelf:bookshelf:8787:v1:${BOOKSHELF_API_KEY}")
 
 if [ ${#APPS[@]} -eq 0 ]; then
     warn "No API keys configured — nothing to monitor. Sleeping forever."

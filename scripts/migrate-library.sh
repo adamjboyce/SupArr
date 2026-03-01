@@ -53,7 +53,7 @@ echo ""
 declare -a SRC_DIRS=()
 while IFS= read -r dir; do
     SRC_DIRS+=("$dir")
-done < <(find /source -maxdepth 1 -mindepth 1 -type d -printf '%f\n' | sort)
+done < <(find /source -maxdepth 1 -mindepth 1 -type d | sed 's|.*/||' | sort)
 
 if [ ${#SRC_DIRS[@]} -eq 0 ]; then
     err "No subdirectories found in /source"
@@ -103,7 +103,7 @@ map_folder() {
             MAPPINGS["$dir"]="books" ;;
         audiobook*)
             MAPPINGS["$dir"]="audiobooks" ;;
-        adult)
+        adult|porn|xxx)
             MAPPINGS["$dir"]="adult" ;;
         *)
             SKIPPED+=("$dir") ;;
@@ -194,7 +194,7 @@ if [ "$MODE" = "execute" ]; then
     trigger_scan "Radarr"  "radarr"  7878 "v3" "${RADARR_API_KEY:-}"  "RescanMovie"
     trigger_scan "Sonarr"  "sonarr"  8989 "v3" "${SONARR_API_KEY:-}"  "RescanSeries"
     trigger_scan "Lidarr"  "lidarr"  8686 "v1" "${LIDARR_API_KEY:-}"  "RescanArtist"
-    trigger_scan "Readarr" "readarr" 8787 "v1" "${READARR_API_KEY:-}" "RescanAuthor"
+    trigger_scan "Bookshelf" "bookshelf" 8787 "v1" "${BOOKSHELF_API_KEY:-}" "RescanAuthor"
     echo ""
 fi
 
