@@ -523,9 +523,15 @@ sync_to_target() {
     local host="$1" label="$2"
     info "Syncing project files to ${label} (${host}:${REMOTE_PROJECT_PATH})..."
 
+    # Determine if we need sudo on the remote
+    local sudo_prefix=""
+    if [ "$SSH_USER" != "root" ]; then
+        sudo_prefix="sudo"
+    fi
+
     # Create remote directory
     # shellcheck disable=SC2086
-    $SSH_CMD "${SSH_USER}@${host}" "mkdir -p ${REMOTE_PROJECT_PATH}"
+    $SSH_CMD "${SSH_USER}@${host}" "${sudo_prefix} mkdir -p ${REMOTE_PROJECT_PATH} && ${sudo_prefix} chown ${SSH_USER}:${SSH_USER} ${REMOTE_PROJECT_PATH}"
 
     # Rsync project files
     rsync -az --delete \
@@ -541,7 +547,7 @@ sync_to_target() {
 
     # Set permissions
     # shellcheck disable=SC2086
-    $SSH_CMD "${SSH_USER}@${host}" "chmod +x ${REMOTE_PROJECT_PATH}/scripts/*.sh && chmod 600 ${REMOTE_PROJECT_PATH}/machine*-*/.env 2>/dev/null || true"
+    $SSH_CMD "${SSH_USER}@${host}" "${sudo_prefix} chmod +x ${REMOTE_PROJECT_PATH}/scripts/*.sh && ${sudo_prefix} chmod 600 ${REMOTE_PROJECT_PATH}/machine*-*/.env 2>/dev/null || true"
 
     log "${label}: files synced"
 }
