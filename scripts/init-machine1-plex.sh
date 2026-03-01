@@ -492,19 +492,29 @@ if [ "$TDARR_READY" = true ]; then
     EXISTING_LIB_NAMES=$(echo "$EXISTING_TDARR_LIBS" | jq -r '.[].name // empty' 2>/dev/null || echo "")
 
     # QSV plugin stack — shared across all video libraries
+    # IMPORTANT: Tdarr requires _id, id (not pluginID), checked, priority, InputsDB (PascalCase)
     TDARR_PLUGINS='[
-        {"pluginID":"Tdarr_Plugin_MC93_Migz1Remux","source":"Community","inputsDB":{"container":"mkv","force_conform":"false"}},
-        {"pluginID":"Tdarr_Plugin_MC93_Migz2CleanTitle","source":"Community","inputsDB":{"clean_audio":"true","clean_subtitles":"true"}},
-        {"pluginID":"Tdarr_Plugin_MC93_Migz3CleanAudio","source":"Community","inputsDB":{"language":"eng,und","commentary":"true","tag_language":"eng","tag_title":"true"}},
-        {"pluginID":"Tdarr_Plugin_MC93_Migz4CleanSubs","source":"Community","inputsDB":{"language":"eng,und","commentary":"true","tag_language":"eng"}},
-        {"pluginID":"Tdarr_Plugin_MC93_Migz5ConvertAudio","source":"Community","inputsDB":{"aac_stereo":"true","downmix":"true"}},
-        {"pluginID":"Tdarr_Plugin_bsh1_Boosh_FFMPEG_QSV_HEVC","source":"Community","inputsDB":{"container":"mkv","encoder":"hevc","target_bitrate_modifier":"0.5","encoder_speedpreset":"slow","enable_10bit":"false","reconvert_hevc":"false"}},
-        {"pluginID":"Tdarr_Plugin_MC93_Migz6OrderStreams","source":"Community","inputsDB":{}}
+        {"_id":"plugin1","id":"Tdarr_Plugin_MC93_Migz1Remux","checked":true,"source":"Community","priority":0,"InputsDB":{"container":"mkv","force_conform":"false"}},
+        {"_id":"plugin2","id":"Tdarr_Plugin_MC93_Migz2CleanTitle","checked":true,"source":"Community","priority":1,"InputsDB":{"clean_audio":"true","clean_subtitles":"true"}},
+        {"_id":"plugin3","id":"Tdarr_Plugin_MC93_Migz3CleanAudio","checked":true,"source":"Community","priority":2,"InputsDB":{"language":"eng,und","commentary":"true","tag_language":"eng","tag_title":"true"}},
+        {"_id":"plugin4","id":"Tdarr_Plugin_MC93_Migz4CleanSubs","checked":true,"source":"Community","priority":3,"InputsDB":{"language":"eng,und","commentary":"true","tag_language":"eng"}},
+        {"_id":"plugin5","id":"Tdarr_Plugin_MC93_Migz5ConvertAudio","checked":true,"source":"Community","priority":4,"InputsDB":{"aac_stereo":"true","downmix":"true"}},
+        {"_id":"plugin6","id":"Tdarr_Plugin_bsh1_Boosh_FFMPEG_QSV_HEVC","checked":true,"source":"Community","priority":5,"InputsDB":{"container":"mkv","encoder":"hevc","target_bitrate_modifier":"0.5","encoder_speedpreset":"slow","enable_10bit":"false","reconvert_hevc":"false"}},
+        {"_id":"plugin7","id":"Tdarr_Plugin_MC93_Migz6OrderStreams","checked":true,"source":"Community","priority":6,"InputsDB":{}}
     ]'
 
-    # Schedule: 1 AM – 5 PM (hours 1-16), off during prime viewing (5 PM – 1 AM)
-    # 168-element array: 24 hours × 7 days
-    TDARR_SCHEDULE='[false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false]'
+    # Decision maker — use plugin-based decisions, skip files already in HEVC
+    TDARR_DECISION='{"settingsPlugin":true,"settingsFlows":false,"settingsVideo":false,"videoExcludeSwitch":true,"video_codec_names_exclude":[{"codec":"hevc","checked":true},{"codec":"h264","checked":false}],"video_size_range_include":{"min":0,"max":100000},"video_height_range_include":{"min":0,"max":3000},"video_width_range_include":{"min":0,"max":4000},"settingsAudio":false,"audioExcludeSwitch":true,"audio_codec_names_exclude":[{"codec":"mp3","checked":true},{"codec":"aac","checked":false}],"audio_size_range_include":{"min":0,"max":10}}'
+
+    # Schedule: all hours enabled (object format required by UI)
+    TDARR_SCHEDULE='['
+    for day in Sun Mon Tue Wed Thur Fri Sat; do
+        for h in $(seq 0 23); do
+            h2=$((h+1)); [ $h2 -eq 24 ] && h2=0
+            TDARR_SCHEDULE="${TDARR_SCHEDULE}{\"_id\":\"${day}:$(printf '%02d' $h)-$(printf '%02d' $h2)\",\"checked\":true},"
+        done
+    done
+    TDARR_SCHEDULE="${TDARR_SCHEDULE%,}]"
 
     create_tdarr_library() {
         local name="$1" folder="$2"
@@ -525,6 +535,7 @@ if [ "$TDARR_READY" = true ]; then
             --arg name "$name" \
             --arg folder "$folder" \
             --argjson plugins "$TDARR_PLUGINS" \
+            --argjson decision "$TDARR_DECISION" \
             --argjson schedule "$TDARR_SCHEDULE" \
             '{
                 data: {
@@ -536,32 +547,39 @@ if [ "$TDARR_READY" = true ]; then
                         name: $name,
                         folder: $folder,
                         cache: "/temp",
-                        output: "",
+                        output: ".",
                         container: ".mkv",
-                        folderWatching: true,
-                        useFsEvents: true,
+                        containerFilter: "mkv,mp4,avi,ts,mov,wmv,flv,m4v,webm,mpg,mpeg,m2ts",
+                        folderWatching: false,
+                        useFsEvents: false,
                         processLibrary: true,
+                        processTranscodes: true,
+                        processHealthChecks: true,
                         scanOnStart: true,
-                        scheduledScanFindNew: false,
+                        scheduledScanFindNew: true,
                         folderWatchScanInterval: 30,
                         scannerThreadCount: 2,
                         pluginCommunity: true,
                         pluginIDs: $plugins,
+                        pluginStackOverview: true,
+                        processPluginsSequentially: true,
+                        decisionMaker: $decision,
                         schedule: $schedule,
                         createdAt: (now * 1000 | floor),
                         priority: 0,
                         foldersToIgnore: "",
-                        containerFilter: "",
                         folderToFolderConversion: false,
                         copyIfConditionsMet: false,
                         handbrake: false,
-                        ffmpeg: false,
+                        ffmpeg: true,
                         handbrakescan: false,
-                        ffmpegscan: false,
-                        exifToolScan: false,
-                        mediaInfoScan: false,
+                        ffmpegscan: true,
+                        exifToolScan: true,
+                        mediaInfoScan: true,
                         closedCaptionScan: false,
-                        expanded: true
+                        holdNewFiles: false,
+                        expanded: true,
+                        scanButtons: true
                     }
                 }
             }')
@@ -582,7 +600,36 @@ if [ "$TDARR_READY" = true ]; then
     create_tdarr_library "Stand-Up"      "/stand-up"
     create_tdarr_library "Concerts"      "/concerts"
 
-    log "Tdarr configured: 7 libraries, QSV HEVC transcode, 1AM-5PM schedule"
+    # Configure internal node worker limits (1 GPU transcode, 1 CPU healthcheck)
+    NODE_ID=$(curl -sf -X POST "${TDARR_URL}/api/v2/cruddb" \
+        -H "Content-Type: application/json" \
+        -d '{"data":{"collection":"NodeJSONDB","mode":"getAll"}}' 2>/dev/null | \
+        jq -r '.[0]._id // empty' 2>/dev/null || echo "")
+    if [ -n "$NODE_ID" ]; then
+        curl -sf -X POST "${TDARR_URL}/api/v2/cruddb" \
+            -H "Content-Type: application/json" \
+            -d "{\"data\":{\"collection\":\"NodeJSONDB\",\"mode\":\"update\",\"docID\":\"${NODE_ID}\",\"obj\":{\"workerLimits\":{\"transcodegpu\":1,\"healthcheckcpu\":1,\"transcodecpu\":0,\"healthcheckgpu\":0}}}}" > /dev/null 2>&1 && \
+            log "  Tdarr node '${NODE_ID}': 1 GPU transcode + 1 CPU healthcheck worker"
+    fi
+
+    # Trigger initial scans (NFS doesn't support inotify, needs explicit scan)
+    info "Triggering initial library scans..."
+    for pair in "Movies:/movies" "TV Shows:/tv" "Anime:/anime" "Anime Movies:/anime-movies" "Documentaries:/documentaries" "Stand-Up:/stand-up" "Concerts:/concerts"; do
+        lib_name="${pair%%:*}"
+        lib_path="${pair##*:}"
+        lib_id=$(echo "$EXISTING_TDARR_LIBS" | jq -r --arg n "$lib_name" '.[] | select(.name==$n) | ._id // empty' 2>/dev/null || echo "")
+        [ -z "$lib_id" ] && lib_id=$(curl -sf -X POST "${TDARR_URL}/api/v2/cruddb" \
+            -H "Content-Type: application/json" \
+            -d '{"data":{"collection":"LibrarySettingsJSONDB","mode":"getAll"}}' 2>/dev/null | \
+            jq -r --arg n "$lib_name" '.[] | select(.name==$n) | ._id // empty' 2>/dev/null || echo "")
+        if [ -n "$lib_id" ]; then
+            curl -sf -X POST "${TDARR_URL}/api/v2/scan-files" \
+                -H "Content-Type: application/json" \
+                -d "{\"data\":{\"scanConfig\":{\"dbID\":\"${lib_id}\",\"mode\":\"scanFindNew\",\"arrayOrPath\":\"${lib_path}\"}}}" > /dev/null 2>&1
+        fi
+    done
+
+    log "Tdarr configured: 7 libraries, QSV HEVC transcode, scans triggered"
 else
     warn "Tdarr API not ready — configure libraries manually at http://localhost:8265"
 fi

@@ -233,7 +233,7 @@ services:
       start_period: 30s
 
   bookshelf:
-    image: ghcr.io/pennydreadful/bookshelf:hardcover
+    image: ghcr.io/pennydreadful/bookshelf:softcover
     container_name: bookshelf
     restart: unless-stopped
     environment:
