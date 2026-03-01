@@ -438,10 +438,11 @@ done
 # If SSH user isn't root, set up key-only root access on each target.
 if [ "$SSH_USER" != "root" ]; then
     NEED_ROOT_SETUP=false
+    ROOT_TEST_CMD="ssh $SSH_OPTS -i $SSH_KEY -o BatchMode=yes -o PasswordAuthentication=no"
 
     for i in "${!TARGETS[@]}"; do
         # shellcheck disable=SC2086
-        if $SSH_CMD "root@${TARGETS[$i]}" "echo ok" &>/dev/null; then
+        if $ROOT_TEST_CMD "root@${TARGETS[$i]}" "echo ok" &>/dev/null; then
             log "Root key auth already works: ${TARGET_LABELS[$i]}"
         else
             NEED_ROOT_SETUP=true
@@ -461,7 +462,7 @@ if [ "$SSH_USER" != "root" ]; then
         setup_root_key() {
             local host="$1" label="$2"
             # shellcheck disable=SC2086
-            if $SSH_CMD "root@${host}" "echo ok" &>/dev/null; then
+            if $ROOT_TEST_CMD "root@${host}" "echo ok" &>/dev/null; then
                 log "Root key auth already works: ${label}"
                 return
             fi
@@ -492,7 +493,7 @@ if [ "$SSH_USER" != "root" ]; then
         # Verify root access works now
         for i in "${!TARGETS[@]}"; do
             # shellcheck disable=SC2086
-            if $SSH_CMD "root@${TARGETS[$i]}" "echo ok" &>/dev/null; then
+            if $ROOT_TEST_CMD "root@${TARGETS[$i]}" "echo ok" &>/dev/null; then
                 log "Root SSH verified: ${TARGET_LABELS[$i]}"
             else
                 err "Root SSH still not working on ${TARGET_LABELS[$i]}. Set up manually and re-run."
