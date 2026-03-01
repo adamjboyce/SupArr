@@ -61,6 +61,10 @@ services:
     image: ghcr.io/haveagitgat/tdarr:latest
     container_name: tdarr
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
     devices:
       - /dev/dri:/dev/dri
     environment:
