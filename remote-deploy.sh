@@ -455,12 +455,8 @@ if [ "$SSH_USER" != "root" ]; then
         echo -e "  ${DIM}This sets up key-only root login (PermitRootLogin prohibit-password).${NC}"
         echo -e "  ${DIM}No password-based root SSH. Just your deploy key.${NC}"
         echo ""
-        ask ROOT_PASS "Root password (for one-time setup)" "" "secret"
-
-        if [ -z "$ROOT_PASS" ]; then
-            err "Root password required for initial setup. Re-run when ready."
-            exit 1
-        fi
+        echo -e "  ${BOLD}You'll be prompted for the root password on each machine.${NC}"
+        echo ""
 
         setup_root_key() {
             local host="$1" label="$2"
@@ -470,20 +466,21 @@ if [ "$SSH_USER" != "root" ]; then
                 return
             fi
 
-            info "Setting up root key auth on ${label}..."
+            info "Setting up root key auth on ${label} (${host})..."
+            echo -e "  ${DIM}Enter the root password when prompted:${NC}"
             local pubkey
             pubkey=$(cat "${SSH_KEY}.pub")
 
-            # Use the regular user's SSH session + su to set up root SSH
+            # SSH as regular user with key, allocate TTY so su can prompt
             # shellcheck disable=SC2086
-            sshpass -p "$ROOT_PASS" ssh $SSH_OPTS "${SSH_USER}@${host}" "su -c '
+            $SSH_CMD -t "${SSH_USER}@${host}" "su -c '
                 mkdir -p /root/.ssh
                 chmod 700 /root/.ssh
                 echo \"${pubkey}\" >> /root/.ssh/authorized_keys
                 chmod 600 /root/.ssh/authorized_keys
                 sed -i \"s/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/\" /etc/ssh/sshd_config
                 systemctl restart sshd
-            '" 2>/dev/null && \
+            '" && \
                 log "Root key auth configured: ${label}" || \
                 { err "Failed to set up root on ${label} — check root password"; exit 1; }
         }
