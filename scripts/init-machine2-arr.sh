@@ -613,7 +613,22 @@ if [ -n "${SABNZBD_API_KEY:-}" ]; then
         curl -sf "${SAB_URL}/api?mode=set_config&section=misc&keyword=host_whitelist&value=$(echo $WL_HOSTS | tr ' ' ',')&apikey=${SABNZBD_API_KEY}" > /dev/null 2>&1 && \
             log "  SABnzbd: host_whitelist → ${WL_HOSTS}" || true
 
-        # Restart SABnzbd to apply path changes + whitelist
+        # Performance & reliability tuning
+        info "Tuning SABnzbd performance settings..."
+        sab_set() { curl -sf "${SAB_URL}/api?mode=set_config&section=misc&keyword=$1&value=$2&apikey=${SABNZBD_API_KEY}" > /dev/null 2>&1; }
+        sab_set "direct_unpack"      "1"    # Unpack while downloading — saves a full post-processing pass
+        sab_set "pre_check"          "1"    # Verify NZB completeness before downloading
+        sab_set "propagation_delay"  "5"    # Wait 5 min for posts to propagate across servers
+        sab_set "max_art_tries"      "6"    # Retry failed article fetches (default 3 is low)
+        sab_set "auto_browser"       "0"    # Don't try to open browser on headless server
+        sab_set "flat_unpack"        "0"    # Preserve subfolder structure from archives
+        sab_set "safe_postproc"      "1"    # Don't process same NZB twice simultaneously
+        sab_set "fail_hopeless_jobs" "1"    # Auto-fail jobs that can't be repaired
+        # Clean junk files after unpacking
+        sab_set "cleanup_list"       ".nfo,.txt,.url,.lnk,.html,.htm,.exe,.bat,.cmd,.com,.scr,.nzb,.sfv,.srr,.info,.db,.DS_Store"
+        log "  SABnzbd: performance settings applied"
+
+        # Restart SABnzbd to apply all changes
         curl -sf "${SAB_URL}/api?mode=restart&apikey=${SABNZBD_API_KEY}" > /dev/null 2>&1 || true
         sleep 5
         log "SABnzbd configured"
@@ -906,6 +921,9 @@ if [ -n "${PROWLARR_API_KEY:-}" ]; then
             fi
         fi
 
+        # Cache schema once — it's a large payload, no need to fetch per indexer
+        ALL_SCHEMAS=$(arr_api "http://${ARR_HOST}:9696/api/v1/indexer/schema" "$PROWLARR_API_KEY" 2>/dev/null || echo "[]")
+
         # Helper to add an indexer from its schema definition
         add_prowlarr_indexer() {
             local def_name="$1" tags_json="${2:-[]}"
@@ -913,18 +931,15 @@ if [ -n "${PROWLARR_API_KEY:-}" ]; then
                 log "  Indexer '${def_name}' already exists"
                 return
             fi
-            # Get schema template for this indexer
-            local schemas
-            schemas=$(arr_api "http://${ARR_HOST}:9696/api/v1/indexer/schema" "$PROWLARR_API_KEY" 2>/dev/null || echo "[]")
             local template
-            template=$(echo "$schemas" | jq --arg n "$def_name" '[.[] | select(.definitionName==$n)] | .[0]' 2>/dev/null || echo "null")
+            template=$(echo "$ALL_SCHEMAS" | jq --arg n "$def_name" '[.[] | select(.definitionName==$n)] | .[0]' 2>/dev/null || echo "null")
             if [ "$template" = "null" ] || [ -z "$template" ]; then
                 warn "  No schema template found for '${def_name}'"
                 return
             fi
             # Enable it and set tags
             local payload
-            payload=$(echo "$template" | jq --argjson tags "$tags_json" '.enable = true | .tags = $tags' 2>/dev/null || echo "")
+            payload=$(echo "$template" | jq --argjson tags "$tags_json" '.enable = true | .tags = $tags | .appProfileId = 1' 2>/dev/null || echo "")
             if [ -n "$payload" ]; then
                 arr_api "http://${ARR_HOST}:9696/api/v1/indexer" "$PROWLARR_API_KEY" POST "$payload" > /dev/null 2>&1 && \
                     log "  Indexer '${def_name}' added" || \
@@ -938,11 +953,11 @@ if [ -n "${PROWLARR_API_KEY:-}" ]; then
         else
             add_prowlarr_indexer "1337x" "[]"
         fi
-        add_prowlarr_indexer "The Pirate Bay" "[]"
-        add_prowlarr_indexer "YTS" "[]"
-        add_prowlarr_indexer "EZTV" "[]"
-        add_prowlarr_indexer "TorrentGalaxy" "[]"
-        add_prowlarr_indexer "Nyaa.si" "[]"
+        add_prowlarr_indexer "thepiratebay" "[]"
+        add_prowlarr_indexer "yts" "[]"
+        add_prowlarr_indexer "eztv" "[]"
+        add_prowlarr_indexer "limetorrents" "[]"
+        add_prowlarr_indexer "nyaasi" "[]"
 
         # Trigger sync to push indexers to all connected *arr apps
         info "Triggering Prowlarr → *arr indexer sync..."
