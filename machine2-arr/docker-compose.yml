@@ -232,7 +232,7 @@ services:
       start_period: 30s
 
   readarr:
-    image: linuxserver/readarr:nightly
+    image: linuxserver/readarr:0.4.19-nightly  # rolling :nightly tag has broken amd64 manifest
     container_name: readarr
     restart: unless-stopped
     environment:
