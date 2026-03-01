@@ -411,6 +411,8 @@ ENV_FILE="$PROJECT_DIR/.env"
 
 update_env_key() {
     local key="$1" value="$2" force="${3:-}"
+    # Sanitize: strip newlines and sed delimiters from value
+    value=$(echo "$value" | tr -d '\n' | tr -d '|')
     if [ -n "$value" ]; then
         if grep -q "^${key}=" "$ENV_FILE"; then
             if [ "$force" = "--force" ]; then
@@ -469,7 +471,7 @@ fi
 # --- Bazarr (stores key differently) ---
 BAZARR_CONF_DB="$APPDATA/bazarr/config/config/config.yaml"
 if [ -f "$BAZARR_CONF_DB" ]; then
-    LIVE_KEY=$(grep -oP 'apikey:\s*\K\S+' "$BAZARR_CONF_DB" 2>/dev/null || echo "")
+    LIVE_KEY=$(grep -oP 'apikey:\s*\K[a-f0-9]+' "$BAZARR_CONF_DB" 2>/dev/null | head -1 || true)
     if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${BAZARR_API_KEY:-}" ]; then
         BAZARR_API_KEY="$LIVE_KEY"
         log "Bazarr API key: ${BAZARR_API_KEY:0:8}..."
