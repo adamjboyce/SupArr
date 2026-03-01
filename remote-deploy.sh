@@ -217,6 +217,16 @@ else
     log "Targets: Spyglass=${PLEX_IP_ADDR}  Privateer=${ARR_IP_ADDR}"
 fi
 
+# ── Load existing .env files if present ──────────────────────────────────────
+PLEX_ENV_PATH="$SCRIPT_DIR/machine1-plex/.env"
+ARR_ENV_PATH="$SCRIPT_DIR/machine2-arr/.env"
+
+if [ -f "$PLEX_ENV_PATH" ] || [ -f "$ARR_ENV_PATH" ]; then
+    [ -f "$PLEX_ENV_PATH" ] && { set -a; source "$PLEX_ENV_PATH"; set +a; }
+    [ -f "$ARR_ENV_PATH" ] && { set -a; source "$ARR_ENV_PATH"; set +a; }
+    log "Loaded existing .env files — will skip already-answered questions"
+fi
+
 # ===========================================================================
 header "Phase 2: Configuration"
 # ===========================================================================
