@@ -209,7 +209,10 @@ log "App data directories created at $APPDATA"
 info "Creating download directories..."
 mkdir -p "$DOWNLOADS_ROOT"/{torrents/{complete,incomplete},usenet/{complete,incomplete}}
 if [ "$REAL_USER" != "root" ]; then
-    chown -R "$REAL_USER":"$REAL_USER" "$DOWNLOADS_ROOT"
+    # chown may fail on NFS mounts with root_squash — that's expected.
+    # NFS ownership is controlled server-side; local chown is best-effort.
+    chown -R "$REAL_USER":"$REAL_USER" "$DOWNLOADS_ROOT" 2>/dev/null || \
+        warn "Could not chown $DOWNLOADS_ROOT (NFS root_squash?) — set ownership on NAS"
 fi
 log "Download directories created at $DOWNLOADS_ROOT"
 

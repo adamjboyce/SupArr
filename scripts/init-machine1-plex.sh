@@ -157,19 +157,18 @@ pkg_install "$PKG_MGR" $BASE_PKGS
 info "Installing Intel GPU drivers..."
 if [ "$PKG_MGR" = "apt" ]; then
     # Debian 12 may use DEB822 format (.sources) or traditional format (.list)
-    # Check for "contrib" specifically — "non-free-firmware" contains "non-free"
-    # as a substring, which gives false positives. "contrib" is always paired
-    # with "non-free" when properly enabled.
+    # Check for "contrib" on active (uncommented) repo lines. The commented-out
+    # cdrom line often contains "contrib" which gives false positives with plain grep.
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then
-        if ! grep -q "contrib" /etc/apt/sources.list.d/debian.sources 2>/dev/null; then
+        if ! grep -v '^\s*#' /etc/apt/sources.list.d/debian.sources 2>/dev/null | grep -q "contrib"; then
             info "Enabling non-free repos (DEB822 format)..."
             sed -i 's/^Components: main.*/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources
             apt-get update -qq
         fi
-    elif ! grep -q "contrib" /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null; then
+    elif ! grep -v '^\s*#' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null | grep -q "contrib"; then
         info "Enabling non-free repos..."
         # Handle lines that already have non-free-firmware but lack contrib + non-free
-        sed -i 's/bookworm main.*/bookworm main contrib non-free non-free-firmware/' /etc/apt/sources.list
+        sed -i '/^[^#]*bookworm main/s/main.*/main contrib non-free non-free-firmware/' /etc/apt/sources.list
         # Deduplicate in case non-free-firmware appeared twice
         sed -i 's/non-free-firmware non-free-firmware/non-free-firmware/' /etc/apt/sources.list
         apt-get update -qq
