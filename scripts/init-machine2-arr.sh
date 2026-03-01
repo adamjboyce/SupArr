@@ -606,7 +606,14 @@ if [ -n "${SABNZBD_API_KEY:-}" ]; then
                 log "  SABnzbd: category '${cat_name}' → ${cat_name}/" || true
         done
 
-        # Restart SABnzbd to apply path changes
+        # Allow Docker container hostnames through SABnzbd host_whitelist
+        # Without this, *arr apps get 403 Forbidden when connecting via Docker DNS names
+        HOSTNAME_VAL=$(hostname 2>/dev/null || echo "")
+        WL_HOSTS="gluetun sabnzbd localhost ${HOSTNAME_VAL}"
+        curl -sf "${SAB_URL}/api?mode=set_config&section=misc&keyword=host_whitelist&value=$(echo $WL_HOSTS | tr ' ' ',')&apikey=${SABNZBD_API_KEY}" > /dev/null 2>&1 && \
+            log "  SABnzbd: host_whitelist → ${WL_HOSTS}" || true
+
+        # Restart SABnzbd to apply path changes + whitelist
         curl -sf "${SAB_URL}/api?mode=restart&apikey=${SABNZBD_API_KEY}" > /dev/null 2>&1 || true
         sleep 5
         log "SABnzbd configured"
@@ -1071,7 +1078,7 @@ if [ -n "${BOOKSHELF_API_KEY:-}" ]; then
                     {\"name\": \"port\", \"value\": 8080},
                     {\"name\": \"username\", \"value\": \"admin\"},
                     {\"name\": \"password\", \"value\": \"${QBIT_PASSWORD}\"},
-                    {\"name\": \"bookCategory\", \"value\": \"bookshelf\"}
+                    {\"name\": \"musicCategory\", \"value\": \"bookshelf\"}
                 ],
                 \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
             }" > /dev/null 2>&1 && log "  Bookshelf: download client (qBit)" || true
@@ -1088,7 +1095,7 @@ if [ -n "${BOOKSHELF_API_KEY:-}" ]; then
                         {\"name\": \"host\", \"value\": \"gluetun\"},
                         {\"name\": \"port\", \"value\": 8085},
                         {\"name\": \"apiKey\", \"value\": \"${SABNZBD_API_KEY}\"},
-                        {\"name\": \"bookCategory\", \"value\": \"bookshelf\"}
+                        {\"name\": \"musicCategory\", \"value\": \"bookshelf\"}
                     ],
                     \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
                 }" > /dev/null 2>&1 && log "  Bookshelf: download client (SABnzbd)" || true
