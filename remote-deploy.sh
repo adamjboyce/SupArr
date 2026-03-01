@@ -433,6 +433,82 @@ for i in "${!TARGETS[@]}"; do
     fi
 done
 
+# ── Root key-only SSH setup ─────────────────────────────────────────────────
+# The init scripts need root for packages, NFS mounts, Docker, etc.
+# If SSH user isn't root, set up key-only root access on each target.
+if [ "$SSH_USER" != "root" ]; then
+    NEED_ROOT_SETUP=false
+
+    for i in "${!TARGETS[@]}"; do
+        # shellcheck disable=SC2086
+        if $SSH_CMD "root@${TARGETS[$i]}" "echo ok" &>/dev/null; then
+            log "Root key auth already works: ${TARGET_LABELS[$i]}"
+        else
+            NEED_ROOT_SETUP=true
+        fi
+    done
+
+    if [ "$NEED_ROOT_SETUP" = true ]; then
+        echo ""
+        warn "Root SSH key access needed for deployment."
+        echo -e "  ${DIM}The init scripts install packages, mount NFS, and configure Docker — all root ops.${NC}"
+        echo -e "  ${DIM}This sets up key-only root login (PermitRootLogin prohibit-password).${NC}"
+        echo -e "  ${DIM}No password-based root SSH. Just your deploy key.${NC}"
+        echo ""
+        ask ROOT_PASS "Root password (for one-time setup)" "" "secret"
+
+        if [ -z "$ROOT_PASS" ]; then
+            err "Root password required for initial setup. Re-run when ready."
+            exit 1
+        fi
+
+        setup_root_key() {
+            local host="$1" label="$2"
+            # shellcheck disable=SC2086
+            if $SSH_CMD "root@${host}" "echo ok" &>/dev/null; then
+                log "Root key auth already works: ${label}"
+                return
+            fi
+
+            info "Setting up root key auth on ${label}..."
+            local pubkey
+            pubkey=$(cat "${SSH_KEY}.pub")
+
+            # Use the regular user's SSH session + su to set up root SSH
+            # shellcheck disable=SC2086
+            sshpass -p "$ROOT_PASS" ssh $SSH_OPTS "${SSH_USER}@${host}" "su -c '
+                mkdir -p /root/.ssh
+                chmod 700 /root/.ssh
+                echo \"${pubkey}\" >> /root/.ssh/authorized_keys
+                chmod 600 /root/.ssh/authorized_keys
+                sed -i \"s/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/\" /etc/ssh/sshd_config
+                systemctl restart sshd
+            '" 2>/dev/null && \
+                log "Root key auth configured: ${label}" || \
+                { err "Failed to set up root on ${label} — check root password"; exit 1; }
+        }
+
+        for i in "${!TARGETS[@]}"; do
+            setup_root_key "${TARGETS[$i]}" "${TARGET_LABELS[$i]}"
+        done
+
+        # Verify root access works now
+        for i in "${!TARGETS[@]}"; do
+            # shellcheck disable=SC2086
+            if $SSH_CMD "root@${TARGETS[$i]}" "echo ok" &>/dev/null; then
+                log "Root SSH verified: ${TARGET_LABELS[$i]}"
+            else
+                err "Root SSH still not working on ${TARGET_LABELS[$i]}. Set up manually and re-run."
+                exit 1
+            fi
+        done
+    fi
+
+    # Switch to root for all subsequent operations
+    SSH_USER="root"
+    log "Using root for deployment operations"
+fi
+
 # ===========================================================================
 header "Phase 4: Generate .env Files"
 # ===========================================================================
