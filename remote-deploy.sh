@@ -517,6 +517,18 @@ if [ "$SSH_USER" != "root" ]; then
     log "Using root for deployment operations"
 fi
 
+# Ensure rsync is available on targets (fresh Debian minimal may not have it)
+for i in "${!TARGETS[@]}"; do
+    # shellcheck disable=SC2086
+    if ! $SSH_CMD "${SSH_USER}@${TARGETS[$i]}" "command -v rsync" &>/dev/null; then
+        info "Installing rsync on ${TARGET_LABELS[$i]}..."
+        # shellcheck disable=SC2086
+        $SSH_CMD "${SSH_USER}@${TARGETS[$i]}" "apt-get install -y -qq rsync" &>/dev/null && \
+            log "rsync installed on ${TARGET_LABELS[$i]}" || \
+            { err "Could not install rsync on ${TARGET_LABELS[$i]}"; exit 1; }
+    fi
+done
+
 # ===========================================================================
 header "Phase 4: Generate .env Files"
 # ===========================================================================
