@@ -60,7 +60,7 @@ fi
 APPDATA="${APPDATA:-/opt/media-stack}"
 MEDIA_ROOT="${MEDIA_ROOT:-/mnt/media}"
 NAS_IP="${NAS_IP:-}"
-NAS_MEDIA_EXPORT="${NAS_MEDIA_EXPORT:-/volume1/media}"
+NAS_MEDIA_EXPORT="${NAS_MEDIA_EXPORT:-/var/nfs/shared/media}"
 
 # Detect the real (non-root) user who should own files and be in docker group.
 # Priority: SUDO_USER (ran via sudo), DEPLOY_USER (set by remote-deploy.sh),
@@ -194,6 +194,54 @@ else
     err "'IGD Multi-Monitor' or 'Internal Graphics' in BIOS and enable it."
     warn "Continuing anyway — Plex will fall back to CPU transcoding"
 fi
+
+# ===========================================================================
+header "Phase 1b: Network Environment Evaluation"
+# ===========================================================================
+# Informational only — reports findings and recommendations. Changes nothing.
+
+info "Evaluating network environment..."
+
+PRIMARY_NIC=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+if [ -n "$PRIMARY_NIC" ]; then
+    NIC_MTU=$(cat /sys/class/net/"$PRIMARY_NIC"/mtu 2>/dev/null || echo "unknown")
+    NIC_MAX_MTU=$(ip -d link show "$PRIMARY_NIC" 2>/dev/null | grep -oP 'maxmtu \K[0-9]+' || echo "unknown")
+    NIC_SPEED=$(cat /sys/class/net/"$PRIMARY_NIC"/speed 2>/dev/null || echo "unknown")
+    log "Primary NIC: $PRIMARY_NIC"
+    log "  Link speed: ${NIC_SPEED} Mbps"
+    log "  Current MTU: $NIC_MTU  |  Max supported: $NIC_MAX_MTU"
+
+    if [ "$NIC_MAX_MTU" != "unknown" ] && [ "$NIC_MAX_MTU" -gt 1500 ] 2>/dev/null && [ "$NIC_MTU" -eq 1500 ] 2>/dev/null; then
+        if [ -n "$NAS_IP" ]; then
+            if ping -M do -s 8972 -c 1 -W 2 "$NAS_IP" &>/dev/null; then
+                log "  Jumbo frames (MTU 9000): ✓ NAS path supports them"
+                warn "  NIC and NAS support jumbo frames but MTU is 1500."
+                warn "  For NFS-heavy workloads, consider setting MTU 9000 on NIC, switch, and NAS."
+            elif ping -M do -s 1472 -c 1 -W 2 "$NAS_IP" &>/dev/null; then
+                log "  Jumbo frames: ✗ Path to NAS ($NAS_IP) capped at MTU 1500"
+                log "  NIC supports MTU $NIC_MAX_MTU but switch/router limits to 1500."
+                if [ "$NIC_SPEED" != "unknown" ] && [ "$NIC_SPEED" -ge 10000 ] 2>/dev/null; then
+                    warn "  You have ${NIC_SPEED}Mbps NICs — enabling jumbo frames on your"
+                    warn "  switch and NAS would reduce overhead on NFS transfers significantly."
+                fi
+            else
+                warn "  Cannot reach NAS at $NAS_IP — skipping MTU path test"
+            fi
+        fi
+    fi
+
+    if command -v nfsstat &>/dev/null; then
+        NFS_VER=$(nfsstat -m 2>/dev/null | grep -oP 'vers=\K[0-9]+' | head -1)
+        if [ -n "$NFS_VER" ]; then
+            log "  NFS version in use: v$NFS_VER"
+            [ "$NFS_VER" -lt 4 ] 2>/dev/null && warn "  NFSv4 is faster than v$NFS_VER — consider upgrading NFS exports"
+        fi
+    fi
+else
+    warn "Could not detect primary network interface"
+fi
+
+log "Network evaluation complete"
 
 # ===========================================================================
 header "Phase 2: Docker Installation"

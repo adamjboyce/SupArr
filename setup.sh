@@ -233,9 +233,9 @@ if [ -n "$NAS_IP" ] && ! validate_ip "$NAS_IP"; then
     err "Invalid IP address: $NAS_IP"; exit 1
 fi
 if [ -n "$NAS_IP" ]; then
-    ask NAS_MEDIA_EXPORT "NAS media export path" "/volume1/media"
+    ask NAS_MEDIA_EXPORT "NAS media export path" "/var/nfs/shared/media"
     if [ "$ROLE" = "arr" ] || [ "$ROLE" = "both" ]; then
-        ask NAS_DOWNLOADS_EXPORT "NAS downloads export path" "/volume1/downloads"
+        ask NAS_DOWNLOADS_EXPORT "NAS downloads export path" "/var/nfs/shared/media/downloads"
         echo -e "  ${DIM}Optional: separate NFS share for Immich photos + Syncthing backups${NC}"
         ask NAS_BACKUPS_EXPORT "NAS backups export path (blank to skip)" ""
     fi
@@ -377,7 +377,7 @@ collect_arr_questions() {
         if ask_yn "Have an existing media library to import?" "n"; then
             MIGRATE_LIBRARY="true"
             if ask_yn "Is the library on your NAS?" "y"; then
-                ask MIGRATE_NAS_EXPORT "NFS export path for existing library" "/volume1/old-media"
+                ask MIGRATE_NAS_EXPORT "NFS export path for existing library" "/var/nfs/shared/old-media"
                 validate_path "$MIGRATE_NAS_EXPORT" || { err "Export path must be absolute"; exit 1; }
             else
                 ask MIGRATE_SOURCE "Local path to existing library" "/mnt/external/media"
@@ -385,6 +385,13 @@ collect_arr_questions() {
             fi
         fi
     fi
+
+    header "Usenet Indexer (Optional)"
+    echo -e "  ${DIM}NZBgeek API key for usenet indexer. Leave blank to skip.${NC}"
+    echo -e "  ${DIM}Get yours at: https://nzbgeek.info/dashboard${NC}\n"
+
+    ask NZBGEEK_API_KEY "NZBgeek API key" "skip"
+    [ "$NZBGEEK_API_KEY" = "skip" ] && NZBGEEK_API_KEY=""
 
     # API keys — init script populates these automatically
     RADARR_API_KEY="${RADARR_API_KEY:-}"
@@ -512,6 +519,7 @@ BAZARR_API_KEY=${BAZARR_API_KEY}
 BOOKSHELF_API_KEY=${BOOKSHELF_API_KEY}
 WHISPARR_API_KEY=${WHISPARR_API_KEY}
 SABNZBD_API_KEY=${SABNZBD_API_KEY}
+NZBGEEK_API_KEY=${NZBGEEK_API_KEY}
 NOTIFIARR_API_KEY=${NOTIFIARR_API_KEY}
 TRAKT_ACCESS_TOKEN=${TRAKT_ACCESS_TOKEN:-}
 PLEX_TOKEN=${PLEX_TOKEN:-}

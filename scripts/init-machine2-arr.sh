@@ -67,7 +67,7 @@ MEDIA_ROOT="${MEDIA_ROOT:-/mnt/media}"
 DOWNLOADS_ROOT="${DOWNLOADS_ROOT:-/mnt/downloads}"
 QBIT_PASSWORD="${QBIT_PASSWORD:-adminadmin}"
 NAS_IP="${NAS_IP:-}"
-NAS_MEDIA_EXPORT="${NAS_MEDIA_EXPORT:-/volume1/media}"
+NAS_MEDIA_EXPORT="${NAS_MEDIA_EXPORT:-/var/nfs/shared/media}"
 
 # Detect the real (non-root) user who should own files and be in docker group.
 # Priority: SUDO_USER (ran via sudo), DEPLOY_USER (set by remote-deploy.sh),
@@ -85,7 +85,7 @@ else
         log "Detected non-root user: $REAL_USER"
     fi
 fi
-NAS_DOWNLOADS_EXPORT="${NAS_DOWNLOADS_EXPORT:-/volume1/downloads}"
+NAS_DOWNLOADS_EXPORT="${NAS_DOWNLOADS_EXPORT:-/var/nfs/shared/media/downloads}"
 NAS_BACKUPS_EXPORT="${NAS_BACKUPS_EXPORT:-}"
 MIGRATE_LIBRARY="${MIGRATE_LIBRARY:-false}"
 MIGRATE_SOURCE="${MIGRATE_SOURCE:-}"
@@ -165,6 +165,67 @@ info "Installing dependencies..."
 pkg_install "$PKG_MGR" $BASE_PKGS
 
 log "System packages installed"
+
+# ===========================================================================
+header "Phase 1b: Network Environment Evaluation"
+# ===========================================================================
+# Informational only — reports findings and recommendations. Changes nothing.
+
+info "Evaluating network environment..."
+
+# Detect primary NIC
+PRIMARY_NIC=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+if [ -n "$PRIMARY_NIC" ]; then
+    NIC_MTU=$(cat /sys/class/net/"$PRIMARY_NIC"/mtu 2>/dev/null || echo "unknown")
+    NIC_MAX_MTU=$(ip -d link show "$PRIMARY_NIC" 2>/dev/null | grep -oP 'maxmtu \K[0-9]+' || echo "unknown")
+    NIC_SPEED=$(cat /sys/class/net/"$PRIMARY_NIC"/speed 2>/dev/null || echo "unknown")
+    log "Primary NIC: $PRIMARY_NIC"
+    log "  Link speed: ${NIC_SPEED} Mbps"
+    log "  Current MTU: $NIC_MTU  |  Max supported: $NIC_MAX_MTU"
+
+    # Flag if NIC supports jumbo but MTU is default
+    if [ "$NIC_MAX_MTU" != "unknown" ] && [ "$NIC_MAX_MTU" -gt 1500 ] 2>/dev/null && [ "$NIC_MTU" -eq 1500 ] 2>/dev/null; then
+        # Test if path to NAS supports larger frames
+        if [ -n "$NAS_IP" ]; then
+            if ping -M do -s 8972 -c 1 -W 2 "$NAS_IP" &>/dev/null; then
+                log "  Jumbo frames (MTU 9000): ✓ NAS path supports them"
+                warn "  NIC and NAS support jumbo frames but MTU is 1500."
+                warn "  For NFS-heavy workloads, consider setting MTU 9000 on NIC, switch, and NAS."
+                warn "  This can improve large file transfer throughput by reducing per-packet overhead."
+            elif ping -M do -s 1472 -c 1 -W 2 "$NAS_IP" &>/dev/null; then
+                log "  Jumbo frames: ✗ Path to NAS ($NAS_IP) capped at MTU 1500"
+                log "  NIC supports MTU $NIC_MAX_MTU but switch/router limits to 1500."
+                if [ "$NIC_SPEED" != "unknown" ] && [ "$NIC_SPEED" -ge 10000 ] 2>/dev/null; then
+                    warn "  You have ${NIC_SPEED}Mbps NICs — enabling jumbo frames on your"
+                    warn "  switch and NAS would reduce overhead on NFS transfers significantly."
+                fi
+            else
+                warn "  Cannot reach NAS at $NAS_IP — skipping MTU path test"
+            fi
+        fi
+    fi
+
+    # NFS version check (will be useful after Phase 4 mounts)
+    if command -v nfsstat &>/dev/null; then
+        NFS_VER=$(nfsstat -m 2>/dev/null | grep -oP 'vers=\K[0-9]+' | head -1)
+        if [ -n "$NFS_VER" ]; then
+            log "  NFS version in use: v$NFS_VER"
+            [ "$NFS_VER" -lt 4 ] 2>/dev/null && warn "  NFSv4 is faster than v$NFS_VER — consider upgrading NFS exports"
+        fi
+    fi
+else
+    warn "Could not detect primary network interface"
+fi
+
+# Check inter-machine latency if PLEX_IP is set
+if [ -n "${PLEX_IP:-}" ]; then
+    PLEX_LATENCY=$(ping -c 3 -W 2 "$PLEX_IP" 2>/dev/null | tail -1 | awk -F'/' '{print $5}')
+    if [ -n "$PLEX_LATENCY" ]; then
+        log "  Latency to Plex ($PLEX_IP): ${PLEX_LATENCY}ms avg"
+    fi
+fi
+
+log "Network evaluation complete"
 
 # ===========================================================================
 header "Phase 2: Docker Installation"
@@ -913,74 +974,90 @@ if [ -n "${PROWLARR_API_KEY:-}" ]; then
             ], "tags": []
         }' > /dev/null 2>&1 && log "  FlareSolverr proxy added" || warn "  FlareSolverr may already exist"
 
-        # --- Prowlarr Public Indexers ---
-        info "Adding public indexers to Prowlarr..."
+        # --- Prowlarr Indexers (from seed file) ---
+        INDEXER_SEED="$SCRIPT_DIR/../machine2-arr/config-seeds/prowlarr-indexers.json"
+        if [ -f "$INDEXER_SEED" ]; then
+            info "Restoring Prowlarr indexers from seed file..."
 
-        # Get existing indexers to avoid duplicates
-        EXISTING_INDEXERS=$(arr_api "http://${ARR_HOST}:9696/api/v1/indexer" "$PROWLARR_API_KEY" 2>/dev/null | \
-            jq -r '.[].definitionName // empty' 2>/dev/null || echo "")
+            # Get existing indexers by name to avoid duplicates
+            EXISTING_INDEXERS=$(arr_api "http://${ARR_HOST}:9696/api/v1/indexer" "$PROWLARR_API_KEY" 2>/dev/null | \
+                jq -r '.[].name // empty' 2>/dev/null || echo "")
 
-        # Create FlareSolverr tag for CloudFlare-protected indexers
-        FLARE_TAG_ID=""
-        EXISTING_TAGS=$(arr_api "http://${ARR_HOST}:9696/api/v1/tag" "$PROWLARR_API_KEY" 2>/dev/null || echo "[]")
-        FLARE_TAG_ID=$(echo "$EXISTING_TAGS" | jq -r '.[] | select(.label=="flaresolverr") | .id' 2>/dev/null || echo "")
-        if [ -z "$FLARE_TAG_ID" ]; then
-            FLARE_TAG_RESPONSE=$(arr_api "http://${ARR_HOST}:9696/api/v1/tag" "$PROWLARR_API_KEY" POST '{"label":"flaresolverr"}' 2>/dev/null || echo "")
-            FLARE_TAG_ID=$(echo "$FLARE_TAG_RESPONSE" | jq -r '.id // empty' 2>/dev/null || echo "")
-            [ -n "$FLARE_TAG_ID" ] && log "  Created 'flaresolverr' tag (id: $FLARE_TAG_ID)"
-        fi
+            # Create FlareSolverr tag for CloudFlare-protected indexers
+            FLARE_TAG_ID=""
+            EXISTING_TAGS=$(arr_api "http://${ARR_HOST}:9696/api/v1/tag" "$PROWLARR_API_KEY" 2>/dev/null || echo "[]")
+            FLARE_TAG_ID=$(echo "$EXISTING_TAGS" | jq -r '.[] | select(.label=="flaresolverr") | .id' 2>/dev/null || echo "")
+            if [ -z "$FLARE_TAG_ID" ]; then
+                FLARE_TAG_RESPONSE=$(arr_api "http://${ARR_HOST}:9696/api/v1/tag" "$PROWLARR_API_KEY" POST '{"label":"flaresolverr"}' 2>/dev/null || echo "")
+                FLARE_TAG_ID=$(echo "$FLARE_TAG_RESPONSE" | jq -r '.id // empty' 2>/dev/null || echo "")
+                [ -n "$FLARE_TAG_ID" ] && log "  Created 'flaresolverr' tag (id: $FLARE_TAG_ID)"
+            fi
 
-        # Link FlareSolverr proxy to the tag
-        if [ -n "$FLARE_TAG_ID" ]; then
-            FLARE_PROXY=$(arr_api "http://${ARR_HOST}:9696/api/v1/indexerProxy" "$PROWLARR_API_KEY" 2>/dev/null || echo "[]")
-            FLARE_PROXY_ID=$(echo "$FLARE_PROXY" | jq -r '.[] | select(.implementation=="FlareSolverr") | .id' 2>/dev/null || echo "")
-            if [ -n "$FLARE_PROXY_ID" ]; then
-                FLARE_PROXY_JSON=$(echo "$FLARE_PROXY" | jq --argjson tid "$FLARE_TAG_ID" \
-                    '.[] | select(.implementation=="FlareSolverr") | .tags = [$tid]' 2>/dev/null || echo "")
-                if [ -n "$FLARE_PROXY_JSON" ]; then
-                    arr_api "http://${ARR_HOST}:9696/api/v1/indexerProxy/${FLARE_PROXY_ID}" "$PROWLARR_API_KEY" PUT "$FLARE_PROXY_JSON" > /dev/null 2>&1 && \
-                        log "  FlareSolverr proxy linked to tag" || true
+            # Link FlareSolverr proxy to the tag
+            if [ -n "$FLARE_TAG_ID" ]; then
+                FLARE_PROXY=$(arr_api "http://${ARR_HOST}:9696/api/v1/indexerProxy" "$PROWLARR_API_KEY" 2>/dev/null || echo "[]")
+                FLARE_PROXY_ID=$(echo "$FLARE_PROXY" | jq -r '.[] | select(.implementation=="FlareSolverr") | .id' 2>/dev/null || echo "")
+                if [ -n "$FLARE_PROXY_ID" ]; then
+                    FLARE_PROXY_JSON=$(echo "$FLARE_PROXY" | jq --argjson tid "$FLARE_TAG_ID" \
+                        '.[] | select(.implementation=="FlareSolverr") | .tags = [$tid]' 2>/dev/null || echo "")
+                    if [ -n "$FLARE_PROXY_JSON" ]; then
+                        arr_api "http://${ARR_HOST}:9696/api/v1/indexerProxy/${FLARE_PROXY_ID}" "$PROWLARR_API_KEY" PUT "$FLARE_PROXY_JSON" > /dev/null 2>&1 && \
+                            log "  FlareSolverr proxy linked to tag" || true
+                    fi
                 fi
             fi
-        fi
 
-        # Cache schema once — it's a large payload, no need to fetch per indexer
-        ALL_SCHEMAS=$(arr_api "http://${ARR_HOST}:9696/api/v1/indexer/schema" "$PROWLARR_API_KEY" 2>/dev/null || echo "[]")
+            # Iterate seed file and POST each indexer
+            IDX_ADDED=0
+            IDX_SKIPPED=0
+            IDX_FAILED=0
+            IDX_COUNT=$(jq 'length' "$INDEXER_SEED")
 
-        # Helper to add an indexer from its schema definition
-        add_prowlarr_indexer() {
-            local def_name="$1" tags_json="${2:-[]}"
-            if echo "$EXISTING_INDEXERS" | grep -qx "$def_name"; then
-                log "  Indexer '${def_name}' already exists"
-                return
-            fi
-            local template
-            template=$(echo "$ALL_SCHEMAS" | jq --arg n "$def_name" '[.[] | select(.definitionName==$n)] | .[0]' 2>/dev/null || echo "null")
-            if [ "$template" = "null" ] || [ -z "$template" ]; then
-                warn "  No schema template found for '${def_name}'"
-                return
-            fi
-            # Enable it and set tags
-            local payload
-            payload=$(echo "$template" | jq --argjson tags "$tags_json" '.enable = true | .tags = $tags | .appProfileId = 1' 2>/dev/null || echo "")
-            if [ -n "$payload" ]; then
-                arr_api "http://${ARR_HOST}:9696/api/v1/indexer" "$PROWLARR_API_KEY" POST "$payload" > /dev/null 2>&1 && \
-                    log "  Indexer '${def_name}' added" || \
-                    warn "  Could not add indexer '${def_name}'"
-            fi
-        }
+            for i in $(seq 0 $((IDX_COUNT - 1))); do
+                IDX_NAME=$(jq -r ".[$i].name" "$INDEXER_SEED")
 
-        # Add public indexers — 1337x needs FlareSolverr, others don't
-        if [ -n "$FLARE_TAG_ID" ]; then
-            add_prowlarr_indexer "1337x" "[$FLARE_TAG_ID]"
+                # Skip if already exists
+                if echo "$EXISTING_INDEXERS" | grep -qxF "$IDX_NAME"; then
+                    IDX_SKIPPED=$((IDX_SKIPPED + 1))
+                    continue
+                fi
+
+                # Build payload — substitute env vars and remap FlareSolverr tag IDs
+                PAYLOAD=$(jq ".[$i]" "$INDEXER_SEED")
+
+                # Substitute NZBgeek API key from env
+                if echo "$PAYLOAD" | jq -e '.fields[] | select(.value=="__NZBGEEK_API_KEY__")' > /dev/null 2>&1; then
+                    if [ -n "${NZBGEEK_API_KEY:-}" ]; then
+                        PAYLOAD=$(echo "$PAYLOAD" | jq --arg key "$NZBGEEK_API_KEY" \
+                            '(.fields[] | select(.name=="apiKey")).value = $key' 2>/dev/null)
+                    else
+                        warn "  Skipping NZBgeek — NZBGEEK_API_KEY not set"
+                        IDX_FAILED=$((IDX_FAILED + 1))
+                        continue
+                    fi
+                fi
+
+                # Remap FlareSolverr tag: seed uses [1] but fresh Prowlarr assigns new IDs
+                if echo "$PAYLOAD" | jq -e '.tags | length > 0' > /dev/null 2>&1; then
+                    if [ -n "$FLARE_TAG_ID" ]; then
+                        PAYLOAD=$(echo "$PAYLOAD" | jq --argjson tid "$FLARE_TAG_ID" '.tags = [$tid]' 2>/dev/null)
+                    else
+                        PAYLOAD=$(echo "$PAYLOAD" | jq '.tags = []' 2>/dev/null)
+                    fi
+                fi
+
+                arr_api "http://${ARR_HOST}:9696/api/v1/indexer" "$PROWLARR_API_KEY" POST "$PAYLOAD" > /dev/null 2>&1
+                if [ $? -eq 0 ]; then
+                    IDX_ADDED=$((IDX_ADDED + 1))
+                else
+                    IDX_FAILED=$((IDX_FAILED + 1))
+                fi
+            done
+
+            log "  Indexers: ${IDX_ADDED} added, ${IDX_SKIPPED} existing, ${IDX_FAILED} failed (${IDX_COUNT} total in seed)"
         else
-            add_prowlarr_indexer "1337x" "[]"
+            warn "  No indexer seed file found at ${INDEXER_SEED} — add indexers manually in Prowlarr UI"
         fi
-        add_prowlarr_indexer "thepiratebay" "[]"
-        add_prowlarr_indexer "yts" "[]"
-        add_prowlarr_indexer "eztv" "[]"
-        add_prowlarr_indexer "limetorrents" "[]"
-        add_prowlarr_indexer "nyaasi" "[]"
 
         # Trigger sync to push indexers to all connected *arr apps
         info "Triggering Prowlarr → *arr indexer sync..."

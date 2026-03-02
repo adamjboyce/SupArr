@@ -1,0 +1,1128 @@
+[
+  {
+    "name": "0Magnet",
+    "definitionName": "0magnet",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "0magnet"
+      }
+    ]
+  },
+  {
+    "name": "1337x",
+    "definitionName": "1337x",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [
+      1
+    ],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "1337x"
+      },
+      {
+        "name": "downloadlink2",
+        "value": 1
+      },
+      {
+        "name": "sort",
+        "value": 2
+      },
+      {
+        "name": "type",
+        "value": 1
+      }
+    ]
+  },
+  {
+    "name": "BT.etree",
+    "definitionName": "btetree",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "btetree"
+      }
+    ]
+  },
+  {
+    "name": "Bangumi Moe",
+    "definitionName": "bangumi-moe",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "bangumi-moe"
+      }
+    ]
+  },
+  {
+    "name": "BlueRoms",
+    "definitionName": "blueroms",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "blueroms"
+      },
+      {
+        "name": "type",
+        "value": 1
+      }
+    ]
+  },
+  {
+    "name": "CrackingPatching",
+    "definitionName": "crackingpatching",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "crackingpatching"
+      }
+    ]
+  },
+  {
+    "name": "DaMagNet",
+    "definitionName": "damagnet",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "damagnet"
+      }
+    ]
+  },
+  {
+    "name": "E-Hentai",
+    "definitionName": "ehentai",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "ehentai"
+      }
+    ]
+  },
+  {
+    "name": "EZTV",
+    "definitionName": "eztv",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "eztv"
+      }
+    ]
+  },
+  {
+    "name": "FileMood",
+    "definitionName": "filemood",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "filemood"
+      }
+    ]
+  },
+  {
+    "name": "Free JAV Torrent",
+    "definitionName": "freejavtorrent",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "freejavtorrent"
+      }
+    ]
+  },
+  {
+    "name": "Internet Archive",
+    "definitionName": "internetarchive",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "internetarchive"
+      },
+      {
+        "name": "titleOnly",
+        "value": true
+      },
+      {
+        "name": "sort",
+        "value": 2
+      },
+      {
+        "name": "type",
+        "value": 1
+      }
+    ]
+  },
+  {
+    "name": "Knaben",
+    "definitionName": "Knaben",
+    "implementation": "Knaben",
+    "configContract": "NoAuthTorrentBaseSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": []
+  },
+  {
+    "name": "LimeTorrents",
+    "definitionName": "limetorrents",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "limetorrents"
+      },
+      {
+        "name": "downloadlink",
+        "value": 1
+      }
+    ]
+  },
+  {
+    "name": "LinuxTracker",
+    "definitionName": "linuxtracker",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "linuxtracker"
+      },
+      {
+        "name": "sort",
+        "value": 1
+      },
+      {
+        "name": "type",
+        "value": 1
+      }
+    ]
+  },
+  {
+    "name": "Mac Torrents Download",
+    "definitionName": "mactorrentsdownload",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "mactorrentsdownload"
+      }
+    ]
+  },
+  {
+    "name": "Magnet Cat",
+    "definitionName": "magnetcat",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "magnetcat"
+      },
+      {
+        "name": "sort",
+        "value": 2
+      }
+    ]
+  },
+  {
+    "name": "MagnetDownload",
+    "definitionName": "magnetdownload",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "magnetdownload"
+      }
+    ]
+  },
+  {
+    "name": "Magnetz",
+    "definitionName": "magnetz",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "magnetz"
+      }
+    ]
+  },
+  {
+    "name": "MixtapeTorrent",
+    "definitionName": "mixtapetorrent",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "mixtapetorrent"
+      }
+    ]
+  },
+  {
+    "name": "MyPornClub",
+    "definitionName": "mypornclub",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "mypornclub"
+      }
+    ]
+  },
+  {
+    "name": "NZBgeek",
+    "definitionName": "Newznab",
+    "implementation": "Newznab",
+    "configContract": "NewznabSettings",
+    "enable": true,
+    "redirect": true,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": true,
+    "supportsPagination": true,
+    "appProfileId": 1,
+    "protocol": "usenet",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "baseUrl",
+        "value": "https://api.nzbgeek.info"
+      },
+      {
+        "name": "apiPath",
+        "value": "/api"
+      },
+      {
+        "name": "apiKey",
+        "value": "__NZBGEEK_API_KEY__"
+      }
+    ]
+  },
+  {
+    "name": "Nipponsei",
+    "definitionName": "nipponsei",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "nipponsei"
+      }
+    ]
+  },
+  {
+    "name": "Nyaa.si",
+    "definitionName": "nyaasi",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "nyaasi"
+      },
+      {
+        "name": "prefer_magnet_links",
+        "value": true
+      },
+      {
+        "name": "type",
+        "value": 1
+      }
+    ]
+  },
+  {
+    "name": "OneJAV",
+    "definitionName": "onejav",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "onejav"
+      }
+    ]
+  },
+  {
+    "name": "PornRips",
+    "definitionName": "pornrips",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "pornrips"
+      }
+    ]
+  },
+  {
+    "name": "Sexy-Pics",
+    "definitionName": "sexypics",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "sexypics"
+      },
+      {
+        "name": "type",
+        "value": 1
+      }
+    ]
+  },
+  {
+    "name": "Shana Project",
+    "definitionName": "shanaproject",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "shanaproject"
+      },
+      {
+        "name": "type",
+        "value": 1
+      }
+    ]
+  },
+  {
+    "name": "SkidrowRepack",
+    "definitionName": "skidrowrepack",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "skidrowrepack"
+      }
+    ]
+  },
+  {
+    "name": "SubsPlease",
+    "definitionName": "SubsPlease",
+    "implementation": "SubsPlease",
+    "configContract": "NoAuthTorrentBaseSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "baseUrl",
+        "value": "https://subsplease.org/"
+      }
+    ]
+  },
+  {
+    "name": "The Pirate Bay",
+    "definitionName": "thepiratebay",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "thepiratebay"
+      }
+    ]
+  },
+  {
+    "name": "Tokyo Toshokan",
+    "definitionName": "tokyotosho",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "tokyotosho"
+      }
+    ]
+  },
+  {
+    "name": "TorrentDownload",
+    "definitionName": "torrentdownload",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "torrentdownload"
+      },
+      {
+        "name": "sort",
+        "value": 1
+      }
+    ]
+  },
+  {
+    "name": "TorrentKitty",
+    "definitionName": "torrentkitty",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "torrentkitty"
+      }
+    ]
+  },
+  {
+    "name": "TorrentProject2",
+    "definitionName": "torrentproject2",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "torrentproject2"
+      }
+    ]
+  },
+  {
+    "name": "TorrentsCSV",
+    "definitionName": "TorrentsCSV",
+    "implementation": "TorrentsCSV",
+    "configContract": "NoAuthTorrentBaseSettings",
+    "enable": false,
+    "redirect": false,
+    "supportsRss": false,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": []
+  },
+  {
+    "name": "Uindex",
+    "definitionName": "uindex",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "uindex"
+      }
+    ]
+  },
+  {
+    "name": "VST Torrentz",
+    "definitionName": "vsttorrents",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "vsttorrents"
+      }
+    ]
+  },
+  {
+    "name": "VSTorrent",
+    "definitionName": "vstorrent",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "vstorrent"
+      },
+      {
+        "name": "type",
+        "value": 1
+      }
+    ]
+  },
+  {
+    "name": "XXXClub",
+    "definitionName": "xxxclub",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "xxxclub"
+      },
+      {
+        "name": "sort",
+        "value": 2
+      },
+      {
+        "name": "type",
+        "value": 1
+      }
+    ]
+  },
+  {
+    "name": "YTS",
+    "definitionName": "yts",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "yts"
+      }
+    ]
+  },
+  {
+    "name": "btstate",
+    "definitionName": "btstate",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "btstate"
+      }
+    ]
+  },
+  {
+    "name": "kickasstorrents.ws",
+    "definitionName": "kickasstorrents-ws",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "kickasstorrents-ws"
+      },
+      {
+        "name": "sort",
+        "value": 2
+      },
+      {
+        "name": "type",
+        "value": 1
+      }
+    ]
+  },
+  {
+    "name": "nekoBT",
+    "definitionName": "nekobt",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "nekobt"
+      }
+    ]
+  },
+  {
+    "name": "plugintorrent",
+    "definitionName": "plugintorrent",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "plugintorrent"
+      },
+      {
+        "name": "type",
+        "value": 1
+      }
+    ]
+  },
+  {
+    "name": "showRSS",
+    "definitionName": "showrss",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "showrss"
+      }
+    ]
+  },
+  {
+    "name": "sukebei.nyaa.si",
+    "definitionName": "sukebeinyaasi",
+    "implementation": "Cardigann",
+    "configContract": "CardigannSettings",
+    "enable": true,
+    "redirect": false,
+    "supportsRss": true,
+    "supportsSearch": true,
+    "supportsRedirect": false,
+    "supportsPagination": false,
+    "appProfileId": 1,
+    "protocol": "torrent",
+    "priority": 25,
+    "tags": [],
+    "fields": [
+      {
+        "name": "definitionFile",
+        "value": "sukebeinyaasi"
+      },
+      {
+        "name": "type",
+        "value": 1
+      }
+    ]
+  }
+]
