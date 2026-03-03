@@ -288,7 +288,7 @@ if [ -n "$NAS_IP" ]; then
         log "Media already mounted at $MEDIA_ROOT"
     else
         # Plex machine mounts media read-write (Tdarr re-encodes in place)
-        FSTAB_ENTRY="${NAS_IP}:${NAS_MEDIA_EXPORT} ${MEDIA_ROOT} nfs rw,hard,intr,rsize=1048576,wsize=1048576,timeo=600,retrans=2 0 0"
+        FSTAB_ENTRY="${NAS_IP}:${NAS_MEDIA_EXPORT} ${MEDIA_ROOT} nfs rw,hard,intr,rsize=1048576,wsize=1048576,timeo=600,retrans=2,x-systemd.automount,x-systemd.mount-timeout=120,x-systemd.idle-timeout=0,_netdev 0 0"
         if ! grep -qF "$MEDIA_ROOT" /etc/fstab; then
             echo "$FSTAB_ENTRY" >> /etc/fstab
             log "Added NFS mount to fstab"
@@ -297,6 +297,43 @@ if [ -n "$NAS_IP" ]; then
     fi
 else
     warn "NAS_IP not set — skipping NFS mount"
+fi
+
+# ===========================================================================
+header "Phase 4b: NFS/Docker Boot Dependencies"
+# ===========================================================================
+# Ensure Docker waits for NFS mounts on boot. Three layers:
+#   1. fstab x-systemd options (done in Phase 4 above)
+#   2. Docker systemd override — RequiresMountsFor
+#   3. NFS stall monitor service with Discord alerts
+
+if [ -n "$NAS_IP" ]; then
+    info "Configuring Docker to wait for NFS mounts..."
+    mkdir -p /etc/systemd/system/docker.service.d
+
+    # Build RequiresMountsFor from actual NFS mount points
+    NFS_MOUNT_PATHS="$MEDIA_ROOT"
+    cat > /etc/systemd/system/docker.service.d/nfs-dependency.conf <<EODROP
+[Unit]
+RequiresMountsFor=$NFS_MOUNT_PATHS
+EODROP
+    log "Docker systemd override created — Docker will wait for NFS"
+
+    # Deploy NFS monitor service
+    info "Deploying NFS stall monitor..."
+    cp "$SCRIPT_DIR/nfs-monitor.sh" /usr/local/bin/nfs-monitor.sh
+    chmod +x /usr/local/bin/nfs-monitor.sh
+    cp "$SCRIPT_DIR/nfs-monitor.service" /etc/systemd/system/nfs-monitor.service
+
+    # Inject Discord webhook if configured
+    if [ -n "${DISCORD_WEBHOOK:-}" ]; then
+        sed -i "s|^Environment=DISCORD_WEBHOOK_URL=.*|Environment=DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK|" \
+            /etc/systemd/system/nfs-monitor.service
+    fi
+
+    systemctl daemon-reload
+    systemctl enable --now nfs-monitor
+    log "NFS monitor service enabled"
 fi
 
 # ===========================================================================
@@ -712,7 +749,9 @@ echo "  │  ✓ System packages + Intel iGPU drivers            │"
 echo "  │  ✓ iGPU verified (/dev/dri/renderD128)             │"
 echo "  │  ✓ Docker installed                                │"
 echo "  │  ✓ Directory structure created                     │"
-echo "  │  ✓ NFS mounts configured                           │"
+echo "  │  ✓ NFS mounts configured (systemd boot deps)       │"
+echo "  │  ✓ Docker waits for NFS before starting            │"
+echo "  │  ✓ NFS stall monitor with Discord alerts           │"
 echo "  │  ✓ Kometa config deployed with API keys            │"
 echo "  │  ✓ All containers running                          │"
 echo "  │  ✓ Plex: hardware transcoding enabled              │"

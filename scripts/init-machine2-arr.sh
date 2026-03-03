@@ -291,7 +291,7 @@ if [ -n "$NAS_IP" ]; then
         log "Media already mounted at $MEDIA_ROOT"
     else
         # Add to fstab if not already there
-        FSTAB_ENTRY="${NAS_IP}:${NAS_MEDIA_EXPORT} ${MEDIA_ROOT} nfs rw,hard,intr,rsize=1048576,wsize=1048576,timeo=600,retrans=2 0 0"
+        FSTAB_ENTRY="${NAS_IP}:${NAS_MEDIA_EXPORT} ${MEDIA_ROOT} nfs rw,hard,intr,rsize=1048576,wsize=1048576,timeo=600,retrans=2,x-systemd.automount,x-systemd.mount-timeout=120,x-systemd.idle-timeout=0,_netdev 0 0"
         if ! grep -qF "$MEDIA_ROOT" /etc/fstab; then
             echo "$FSTAB_ENTRY" >> /etc/fstab
             log "Added media NFS mount to fstab"
@@ -326,7 +326,7 @@ if [ -n "$NAS_IP" ]; then
         if mountpoint -q "$DOWNLOADS_ROOT" 2>/dev/null; then
             log "Downloads already mounted at $DOWNLOADS_ROOT"
         else
-            DL_FSTAB_ENTRY="${NAS_IP}:${NAS_DOWNLOADS_EXPORT} ${DOWNLOADS_ROOT} nfs rw,hard,intr,rsize=1048576,wsize=1048576,timeo=600,retrans=2 0 0"
+            DL_FSTAB_ENTRY="${NAS_IP}:${NAS_DOWNLOADS_EXPORT} ${DOWNLOADS_ROOT} nfs rw,hard,intr,rsize=1048576,wsize=1048576,timeo=600,retrans=2,x-systemd.automount,x-systemd.mount-timeout=120,x-systemd.idle-timeout=0,_netdev 0 0"
             if ! grep -qF "$DOWNLOADS_ROOT" /etc/fstab; then
                 echo "$DL_FSTAB_ENTRY" >> /etc/fstab
                 log "Added downloads NFS mount to fstab"
@@ -351,7 +351,7 @@ if [ -n "$NAS_IP" ]; then
         if mountpoint -q /mnt/backups 2>/dev/null; then
             log "Backups already mounted at /mnt/backups"
         else
-            BK_FSTAB_ENTRY="${NAS_IP}:${NAS_BACKUPS_EXPORT} /mnt/backups nfs rw,hard,intr,rsize=1048576,wsize=1048576,timeo=600,retrans=2 0 0"
+            BK_FSTAB_ENTRY="${NAS_IP}:${NAS_BACKUPS_EXPORT} /mnt/backups nfs rw,hard,intr,rsize=1048576,wsize=1048576,timeo=600,retrans=2,x-systemd.automount,x-systemd.mount-timeout=120,x-systemd.idle-timeout=0,_netdev 0 0"
             if ! grep -qF "/mnt/backups" /etc/fstab; then
                 echo "$BK_FSTAB_ENTRY" >> /etc/fstab
                 log "Added backups NFS mount to fstab"
@@ -402,6 +402,44 @@ if [ "$MIGRATE_LIBRARY" = "true" ] && [ -z "$MIGRATE_NAS_EXPORT" ] && [ -n "$MIG
             warn "Migration source path does not exist: $MIGRATE_SOURCE"
         fi
     fi
+fi
+
+# ===========================================================================
+header "Phase 4b: NFS/Docker Boot Dependencies"
+# ===========================================================================
+# Ensure Docker waits for NFS mounts on boot. Three layers:
+#   1. fstab x-systemd options (done in Phase 4 above)
+#   2. Docker systemd override — RequiresMountsFor
+#   3. NFS stall monitor service with Discord alerts
+
+if [ -n "$NAS_IP" ]; then
+    info "Configuring Docker to wait for NFS mounts..."
+    mkdir -p /etc/systemd/system/docker.service.d
+
+    # Build RequiresMountsFor from critical NFS mount points
+    # Only media + downloads — backups is non-critical for container startup
+    NFS_MOUNT_PATHS="$MEDIA_ROOT $DOWNLOADS_ROOT"
+    cat > /etc/systemd/system/docker.service.d/nfs-dependency.conf <<EODROP
+[Unit]
+RequiresMountsFor=$NFS_MOUNT_PATHS
+EODROP
+    log "Docker systemd override created — Docker will wait for NFS"
+
+    # Deploy NFS monitor service
+    info "Deploying NFS stall monitor..."
+    cp "$SCRIPT_DIR/nfs-monitor.sh" /usr/local/bin/nfs-monitor.sh
+    chmod +x /usr/local/bin/nfs-monitor.sh
+    cp "$SCRIPT_DIR/nfs-monitor.service" /etc/systemd/system/nfs-monitor.service
+
+    # Inject Discord webhook if configured
+    if [ -n "${DISCORD_WEBHOOK:-}" ]; then
+        sed -i "s|^Environment=DISCORD_WEBHOOK_URL=.*|Environment=DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK|" \
+            /etc/systemd/system/nfs-monitor.service
+    fi
+
+    systemctl daemon-reload
+    systemctl enable --now nfs-monitor
+    log "NFS monitor service enabled"
 fi
 
 # ===========================================================================
@@ -1738,7 +1776,9 @@ echo "  │  AUTOMATED                                          │"
 echo "  ├─────────────────────────────────────────────────────┤"
 echo "  │  ✓ System packages & Docker                        │"
 echo "  │  ✓ Directory structure (app data + media + dl)     │"
-echo "  │  ✓ NFS mounts (media + downloads if NAS_IP set)   │"
+echo "  │  ✓ NFS mounts (systemd boot deps + automount)     │"
+echo "  │  ✓ Docker waits for NFS before starting            │"
+echo "  │  ✓ NFS stall monitor with Discord alerts           │"
 echo "  │  ✓ qBittorrent pre-seeded config                  │"
 echo "  │  ✓ All containers running                          │"
 echo "  │  ✓ API keys collected & saved to .env              │"

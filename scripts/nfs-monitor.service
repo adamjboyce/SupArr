@@ -1,0 +1,18 @@
+[Unit]
+Description=NFS Stall Monitor — watches for NFS server failures
+After=network.target nfs-client.target
+Wants=nfs-client.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nfs-monitor.sh
+Restart=always
+RestartSec=10
+EnvironmentFile=-/etc/default/nfs-monitor
+Environment=DISCORD_WEBHOOK_URL=
+Environment=MACHINE_NAME=%H
+Environment=DIRECT_LINK_IP=
+Environment=DIRECT_LINK_CHECK_INTERVAL=60
+
+[Install]
+WantedBy=multi-user.target
