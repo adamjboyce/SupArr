@@ -11,5 +11,9 @@
 .DS_Store
 Thumbs.db
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 # Mal state files (session-specific, not project code)
 .mal/
