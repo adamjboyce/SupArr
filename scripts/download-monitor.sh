@@ -2,23 +2,36 @@
 # =============================================================================
 # Download Health Monitor
 # =============================================================================
-# Checks *arr queue APIs for stalled/warning torrents. Removes stalled items
-# (with blocklist) so *arr auto-searches for alternatives.
+# Two-layer cleanup:
 #
-# Runs as a loop inside a container. Configure via environment variables:
-#   STALL_THRESHOLD_HOURS  — hours before a warning item is considered stalled (default: 6)
-#   CHECK_INTERVAL         — seconds between checks (default: 3600 = 1 hour)
-#   DISCORD_WEBHOOK_URL    — optional Discord webhook for notifications
-#   RADARR_API_KEY, SONARR_API_KEY, LIDARR_API_KEY, BOOKSHELF_API_KEY — app keys
+#   Layer 1 — *arr queue cleanup:
+#     Checks Radarr/Sonarr/Lidarr/Bookshelf/Whisparr queues for stalled
+#     downloads. Removes + blocklists so the *arr auto-searches alternatives.
 #
+#   Layer 2 — qBittorrent direct cleanup:
+#     Catches torrents the *arr layer misses (orphans, metadata-stuck, truly
+#     dead). Removes from qBit directly.
+#     - metaDL (stuck downloading metadata) > META_THRESHOLD_HOURS
+#     - stalledDL with 0 seeds and 0 availability > DEAD_THRESHOLD_HOURS
+#     - missingFiles (orphaned torrents with deleted data)
+#
+# Removing dead torrents frees active slots for healthy ones. *arr apps detect
+# the removal and auto-search for alternative releases.
+#
+# Runs as a loop inside a container. Configure via environment variables.
 # Requires: curl, jq, bash
 # =============================================================================
 
 set -euo pipefail
 
 STALL_THRESHOLD_HOURS="${STALL_THRESHOLD_HOURS:-6}"
+META_THRESHOLD_HOURS="${META_THRESHOLD_HOURS:-12}"
+DEAD_THRESHOLD_HOURS="${DEAD_THRESHOLD_HOURS:-24}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-3600}"
 DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+QBIT_URL="${QBIT_URL:-http://gluetun:8080}"
+QBIT_USERNAME="${QBIT_USERNAME:-}"
+QBIT_PASSWORD="${QBIT_PASSWORD:-}"
 
 log()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [OK] $1"; }
 warn() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [!!] $1"; }
@@ -27,15 +40,11 @@ info() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [->] $1"; }
 # Build list of apps to monitor (name:host:port:apiVersion:apiKey)
 # Container hostnames used for Docker network resolution
 declare -a APPS=()
-[ -n "${RADARR_API_KEY:-}" ]  && APPS+=("Radarr:radarr:7878:v3:${RADARR_API_KEY}")
-[ -n "${SONARR_API_KEY:-}" ]  && APPS+=("Sonarr:sonarr:8989:v3:${SONARR_API_KEY}")
-[ -n "${LIDARR_API_KEY:-}" ]  && APPS+=("Lidarr:lidarr:8686:v1:${LIDARR_API_KEY}")
+[ -n "${RADARR_API_KEY:-}" ]    && APPS+=("Radarr:radarr:7878:v3:${RADARR_API_KEY}")
+[ -n "${SONARR_API_KEY:-}" ]    && APPS+=("Sonarr:sonarr:8989:v3:${SONARR_API_KEY}")
+[ -n "${LIDARR_API_KEY:-}" ]    && APPS+=("Lidarr:lidarr:8686:v1:${LIDARR_API_KEY}")
 [ -n "${BOOKSHELF_API_KEY:-}" ] && APPS+=("Bookshelf:bookshelf:8787:v1:${BOOKSHELF_API_KEY}")
-
-if [ ${#APPS[@]} -eq 0 ]; then
-    warn "No API keys configured — nothing to monitor. Sleeping forever."
-    exec sleep infinity
-fi
+[ -n "${WHISPARR_API_KEY:-}" ]  && APPS+=("Whisparr:whisparr:6969:v3:${WHISPARR_API_KEY}")
 
 # Notify Discord (fire-and-forget, jq handles JSON escaping)
 notify_discord() {
@@ -60,7 +69,8 @@ age_hours() {
     echo $(( (now_epoch - added_epoch) / 3600 ))
 }
 
-# Check one app's queue for stalled downloads
+# ── Layer 1: *arr queue cleanup ──────────────────────────────────────────────
+
 check_and_clean() {
     local name="$1" host="$2" port="$3" api_ver="$4" api_key="$5"
     local url="http://${host}:${port}/api/${api_ver}"
@@ -132,16 +142,126 @@ check_and_clean() {
     fi
 }
 
+# ── Layer 2: qBittorrent direct cleanup ──────────────────────────────────────
+
+QBIT_COOKIE_FILE="/tmp/qbit_cookies"
+
+qbit_login() {
+    if [ -z "$QBIT_USERNAME" ] || [ -z "$QBIT_PASSWORD" ]; then
+        # No auth configured — try without login
+        return 0
+    fi
+    curl -sf -c "$QBIT_COOKIE_FILE" \
+        "${QBIT_URL}/api/v2/auth/login" \
+        -d "username=${QBIT_USERNAME}&password=${QBIT_PASSWORD}" > /dev/null 2>&1
+}
+
+qbit_api() {
+    local endpoint="$1"
+    shift
+    curl -sf -b "$QBIT_COOKIE_FILE" "${QBIT_URL}/api/v2${endpoint}" "$@" 2>/dev/null
+}
+
+clean_qbit() {
+    # Login if needed
+    qbit_login || { warn "qBit: login failed, skipping direct cleanup"; return; }
+
+    # Fetch all torrents
+    local torrents
+    torrents=$(qbit_api "/torrents/info" || echo "")
+
+    if [ -z "$torrents" ] || [ "$torrents" = "[]" ]; then
+        return
+    fi
+
+    local now
+    now=$(date +%s)
+    local meta_removed=0
+    local dead_removed=0
+    local missing_removed=0
+    local removed_names=""
+
+    # Process each torrent
+    echo "$torrents" | jq -c '.[]' | while read -r torrent; do
+        local state name hash added_on seeds avail
+        state=$(echo "$torrent" | jq -r '.state')
+        name=$(echo "$torrent" | jq -r '.name')
+        hash=$(echo "$torrent" | jq -r '.hash')
+        added_on=$(echo "$torrent" | jq -r '.added_on')
+        seeds=$(echo "$torrent" | jq -r '.num_complete // 0')
+        avail=$(echo "$torrent" | jq -r '.availability // 0')
+
+        local age_h=$(( (now - added_on) / 3600 ))
+
+        local should_remove=false
+        local reason=""
+
+        # Metadata stuck — no info dict available
+        if [ "$state" = "metaDL" ] && [ "$age_h" -ge "$META_THRESHOLD_HOURS" ]; then
+            should_remove=true
+            reason="metadata stuck ${age_h}h"
+        fi
+
+        # Stalled with no seeds and no availability — truly dead
+        if [ "$state" = "stalledDL" ] && [ "$seeds" -eq 0 ] && [ "$age_h" -ge "$DEAD_THRESHOLD_HOURS" ]; then
+            # Check availability is 0 or very near 0
+            local avail_pct
+            avail_pct=$(echo "$avail" | awk '{printf "%d", $1 * 100}')
+            if [ "${avail_pct:-0}" -eq 0 ]; then
+                should_remove=true
+                reason="dead (0 seeds, 0 availability, ${age_h}h)"
+            fi
+        fi
+
+        # Missing files — orphaned torrent
+        if [ "$state" = "missingFiles" ]; then
+            should_remove=true
+            reason="missing files"
+        fi
+
+        if [ "$should_remove" = "true" ]; then
+            info "qBit: removing [${reason}]: ${name:0:70}"
+            qbit_api "/torrents/delete" -d "hashes=${hash}&deleteFiles=true" > /dev/null 2>&1
+        fi
+    done
+
+    # Count what was removed (re-fetch and compare)
+    local after_count
+    after_count=$(qbit_api "/torrents/info" | jq 'length' 2>/dev/null || echo "?")
+    local before_count
+    before_count=$(echo "$torrents" | jq 'length')
+    local diff=$((before_count - after_count))
+
+    if [ "$diff" -gt 0 ]; then
+        log "qBit: removed ${diff} dead/stuck torrent(s) (was ${before_count}, now ${after_count})"
+        notify_discord "**qBittorrent** — Removed ${diff} dead torrent(s) (metadata stuck, 0-seed stalled, missing files). Active slots freed for healthy downloads."
+    else
+        log "qBit: no dead torrents to clean"
+    fi
+}
+
 # ── Main Loop ───────────────────────────────────────────────────────────────
 
+if [ ${#APPS[@]} -eq 0 ] && [ -z "${QBIT_URL:-}" ]; then
+    warn "No API keys or qBit URL configured — nothing to monitor. Sleeping forever."
+    exec sleep infinity
+fi
+
 log "Download monitor started"
-log "Monitoring: ${APPS[*]}"
-log "Stall threshold: ${STALL_THRESHOLD_HOURS}h | Check interval: ${CHECK_INTERVAL}s"
+[ ${#APPS[@]} -gt 0 ] && log "Layer 1 (*arr): ${APPS[*]}"
+log "Layer 2 (qBit): ${QBIT_URL}"
+log "Thresholds — *arr stall: ${STALL_THRESHOLD_HOURS}h | metadata: ${META_THRESHOLD_HOURS}h | dead: ${DEAD_THRESHOLD_HOURS}h"
+log "Check interval: ${CHECK_INTERVAL}s"
 
 while true; do
+    # Layer 1: *arr queue cleanup
     for app_entry in "${APPS[@]}"; do
         IFS=':' read -r name host port api_ver api_key <<< "$app_entry"
         check_and_clean "$name" "$host" "$port" "$api_ver" "$api_key"
     done
+
+    # Layer 2: qBit direct cleanup
+    clean_qbit
+
     sleep "$CHECK_INTERVAL"
 done
