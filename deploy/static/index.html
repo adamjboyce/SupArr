@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SupArr Deploy</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app" id="app">
+
+    <!-- Header -->
+    <header class="header">
+        <div>
+            <div class="header-title"><span>Sup</span>Arr Deploy</div>
+            <div class="header-subtitle">Media Stack Deployment Wizard</div>
+        </div>
+        <div id="conn-status"></div>
+    </header>
+
+    <!-- Stepper -->
+    <nav class="stepper" id="stepper"></nav>
+
+    <!-- Main Content Area -->
+    <div class="main" id="main-content">
+
+        <!-- ── Step 1: Deploy Mode ─────────────────────────────────── -->
+        <div class="step-panel card" data-step="1">
+            <div class="card-title">Deploy Mode</div>
+            <div class="card-subtitle">How are you running SupArr?</div>
+            <div class="mode-cards">
+                <div class="mode-card" data-value="two" onclick="selectMode('two')">
+                    <div class="mode-card-icon">&#9741;&#9741;</div>
+                    <div class="mode-card-title">Two Machines</div>
+                    <div class="mode-card-desc">Spyglass (Plex) + Privateer (*arr)</div>
+                </div>
+                <div class="mode-card" data-value="single" onclick="selectMode('single')">
+                    <div class="mode-card-icon">&#9741;</div>
+                    <div class="mode-card-title">Single Machine</div>
+                    <div class="mode-card-desc">Everything on one box</div>
+                </div>
+            </div>
+            <div class="step-nav">
+                <div></div>
+                <button class="btn btn-primary" onclick="nextStep()">Continue</button>
+            </div>
+        </div>
+
+        <!-- ── Step 2: Target Machines ─────────────────────────────── -->
+        <div class="step-panel card hidden" data-step="2">
+            <div class="card-title">Target Machines</div>
+            <div class="card-subtitle">Where are we deploying?</div>
+
+            <div id="targets-two">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Spyglass (Plex) IP</label>
+                        <div class="flex gap-8">
+                            <input class="form-input" data-key="plex_ip" type="text" placeholder="192.168.1.100">
+                            <button class="btn btn-sm btn-secondary" onclick="testHost('plex_ip')">Test</button>
+                        </div>
+                        <div class="form-help" id="status-plex_ip"></div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Privateer (*arr) IP</label>
+                        <div class="flex gap-8">
+                            <input class="form-input" data-key="arr_ip" type="text" placeholder="192.168.1.101">
+                            <button class="btn btn-sm btn-secondary" onclick="testHost('arr_ip')">Test</button>
+                        </div>
+                        <div class="form-help" id="status-arr_ip"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="targets-single" class="hidden">
+                <div class="form-group">
+                    <label class="form-label">Machine IP</label>
+                    <div class="flex gap-8">
+                        <input class="form-input" data-key="single_ip" type="text" placeholder="192.168.1.100">
+                        <button class="btn btn-sm btn-secondary" onclick="testHost('single_ip')">Test</button>
+                    </div>
+                    <div class="form-help" id="status-single_ip"></div>
+                </div>
+            </div>
+
+            <div class="form-row mt-16">
+                <div class="form-group">
+                    <label class="form-label">SSH Username</label>
+                    <input class="form-input" data-key="ssh_user" type="text" value="root">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">SSH Password <span class="optional">(for key deploy)</span></label>
+                    <input class="form-input" data-key="ssh_pass" type="password" placeholder="Used once, then discarded">
+                </div>
+            </div>
+
+            <div class="form-group mt-16">
+                <label class="form-label">NAS IP <span class="optional">(optional)</span></label>
+                <input class="form-input" data-key="nas_ip" type="text" placeholder="Leave blank if no NAS">
+                <div class="form-help">For NFS mounts — media and downloads on network storage</div>
+            </div>
+
+            <div class="step-nav">
+                <button class="btn btn-secondary" onclick="prevStep()">Back</button>
+                <button class="btn btn-primary" onclick="nextStep()">Continue</button>
+            </div>
+        </div>
+
+        <!-- ── Step 3: Storage & Network ───────────────────────────── -->
+        <div class="step-panel card hidden" data-step="3">
+            <div class="card-title">Storage &amp; Network</div>
+            <div class="card-subtitle">Paths and system configuration</div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">User ID (PUID)</label>
+                    <input class="form-input" data-key="puid" type="text" value="1000">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Group ID (PGID)</label>
+                    <input class="form-input" data-key="pgid" type="text" value="1000">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Timezone</label>
+                    <select class="form-input" data-key="tz" id="tz-select"></select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Local Subnet</label>
+                    <input class="form-input" data-key="local_subnet" type="text" value="192.168.1.0/24">
+                </div>
+            </div>
+
+            <!-- Two-machine paths -->
+            <div id="paths-two">
+                <div class="form-row mt-16">
+                    <div class="form-group">
+                        <label class="form-label">Spyglass Media Root</label>
+                        <input class="form-input" data-key="plex_media_root" type="text" value="/mnt/media">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Spyglass App Data</label>
+                        <input class="form-input" data-key="plex_appdata" type="text" value="/opt/media-stack">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Privateer Media Root</label>
+                        <input class="form-input" data-key="arr_media_root" type="text" value="/mnt/media">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Privateer Downloads Root</label>
+                        <input class="form-input" data-key="arr_downloads_root" type="text" value="/mnt/downloads">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Privateer App Data</label>
+                    <input class="form-input" data-key="arr_appdata" type="text" value="/opt/arr-stack">
+                </div>
+            </div>
+
+            <!-- Single-machine paths -->
+            <div id="paths-single" class="hidden">
+                <div class="form-row mt-16">
+                    <div class="form-group">
+                        <label class="form-label">Media Root</label>
+                        <input class="form-input" data-key="media_root" type="text" value="/mnt/media">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Downloads Root</label>
+                        <input class="form-input" data-key="downloads_root" type="text" value="/mnt/downloads">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Plex App Data</label>
+                        <input class="form-input" data-key="single_plex_appdata" type="text" value="/opt/media-stack">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">*arr App Data</label>
+                        <input class="form-input" data-key="single_arr_appdata" type="text" value="/opt/arr-stack">
+                    </div>
+                </div>
+            </div>
+
+            <!-- NAS exports -->
+            <div id="nas-fields" class="hidden mt-16">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">NAS Media Export</label>
+                        <input class="form-input" data-key="nas_media_export" type="text" value="/var/nfs/shared/media">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">NAS Downloads Export</label>
+                        <input class="form-input" data-key="nas_downloads_export" type="text" value="/var/nfs/shared/media/downloads">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">NAS Backups Export <span class="optional">(optional)</span></label>
+                    <input class="form-input" data-key="nas_backups_export" type="text" placeholder="For Immich photos, Syncthing">
+                </div>
+            </div>
+
+            <div class="form-group mt-16">
+                <label class="form-label">Tailscale Auth Key <span class="optional">(optional)</span></label>
+                <input class="form-input" data-key="tailscale_auth_key" type="text" placeholder="tskey-auth-...">
+                <div class="form-help">Remote access without port forwarding</div>
+            </div>
+
+            <div class="step-nav">
+                <button class="btn btn-secondary" onclick="prevStep()">Back</button>
+                <button class="btn btn-primary" onclick="nextStep()">Continue</button>
+            </div>
+        </div>
+
+        <!-- ── Step 4: Plex Config ─────────────────────────────────── -->
+        <div class="step-panel card hidden" data-step="4">
+            <div class="card-title">Plex Configuration</div>
+            <div class="card-subtitle">Spyglass (Plex server) settings</div>
+
+            <div class="alert alert-info mb-16">
+                All fields are optional. You can configure them now or after deployment.
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Plex Claim Token <span class="optional">(optional)</span></label>
+                    <input class="form-input" data-key="plex_claim_token" type="text" placeholder="claim-...">
+                    <div class="form-help">Get from <a href="https://plex.tv/claim" target="_blank" style="color:var(--accent)">plex.tv/claim</a> — valid ~4 minutes</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Plex Token <span class="optional">(optional)</span></label>
+                    <input class="form-input" data-key="plex_token" type="text" placeholder="Your Plex auth token">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Plex Server IP (for Kometa) <span class="optional">(optional)</span></label>
+                <input class="form-input" data-key="plex_ip_for_kometa" type="text" placeholder="Auto-detected if blank">
+                <div class="form-help">Set manually if Plex is on a different host than Spyglass</div>
+            </div>
+
+            <div class="form-row mt-16">
+                <div class="form-group">
+                    <label class="form-label">TMDb API Key <span class="optional">(optional)</span></label>
+                    <input class="form-input" data-key="tmdb_api_key" type="text" placeholder="Free at themoviedb.org">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">MDBList API Key <span class="optional">(optional)</span></label>
+                    <input class="form-input" data-key="mdblist_api_key" type="text" placeholder="Free at mdblist.com">
+                </div>
+            </div>
+
+            <div class="form-row mt-16">
+                <div class="form-group">
+                    <label class="form-label">Trakt Client ID <span class="optional">(optional)</span></label>
+                    <input class="form-input" data-key="trakt_client_id" type="text" placeholder="Create app at trakt.tv">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Trakt Client Secret <span class="optional">(optional)</span></label>
+                    <input class="form-input" data-key="trakt_client_secret" type="password">
+                </div>
+            </div>
+
+            <div class="mt-16" id="trakt-auth-section">
+                <button class="btn btn-secondary" id="trakt-auth-btn" onclick="startTraktAuth()">Authorize Trakt</button>
+                <span class="text-sm text-muted" id="trakt-auth-status"></span>
+            </div>
+
+            <div class="step-nav">
+                <button class="btn btn-secondary" onclick="prevStep()">Back</button>
+                <button class="btn btn-primary" onclick="nextStep()">Continue</button>
+            </div>
+        </div>
+
+        <!-- ── Step 5: Arr Config ──────────────────────────────────── -->
+        <div class="step-panel card hidden" data-step="5">
+            <div class="card-title">*arr Configuration</div>
+            <div class="card-subtitle">Privateer (download stack) settings</div>
+
+            <div class="mb-16">
+                <label class="form-label mb-8">VPN Type</label>
+                <div class="choice-group">
+                    <div class="choice-card selected" data-value="wireguard" onclick="selectChoice('vpn_type', 'wireguard')">
+                        <div class="choice-card-title">WireGuard / NordLynx</div>
+                        <div class="choice-card-desc">Recommended — faster, lower overhead</div>
+                    </div>
+                    <div class="choice-card" data-value="openvpn" onclick="selectChoice('vpn_type', 'openvpn')">
+                        <div class="choice-card-title">OpenVPN</div>
+                        <div class="choice-card-desc">Legacy — wider compatibility</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="vpn-wireguard">
+                <div class="form-group">
+                    <label class="form-label">NordLynx Private Key</label>
+                    <input class="form-input" data-key="nord_wireguard_key" type="password">
+                    <div class="form-help">Get from NordVPN Linux app or API</div>
+                </div>
+            </div>
+
+            <div id="vpn-openvpn" class="hidden">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Nord Service Username</label>
+                        <input class="form-input" data-key="nord_user" type="text">
+                        <div class="form-help">Service credentials — NOT your account email</div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Nord Service Password</label>
+                        <input class="form-input" data-key="nord_pass" type="password">
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-row mt-16">
+                <div class="form-group">
+                    <label class="form-label">VPN Country</label>
+                    <input class="form-input" data-key="nord_country" type="text" value="United States">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">VPN City <span class="optional">(optional)</span></label>
+                    <input class="form-input" data-key="nord_city" type="text" placeholder="Auto-select">
+                </div>
+            </div>
+
+            <div class="form-row mt-16">
+                <div class="form-group">
+                    <label class="form-label">qBittorrent Password</label>
+                    <input class="form-input" data-key="qbit_password" type="password" value="SupArr2026!">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Immich DB Password</label>
+                    <input class="form-input" data-key="immich_db_password" type="password" placeholder="Auto-generated if blank">
+                </div>
+            </div>
+
+            <div class="form-row mt-16">
+                <div class="form-group">
+                    <label class="form-label">Notifiarr API Key <span class="optional">(optional)</span></label>
+                    <input class="form-input" data-key="notifiarr_api_key" type="text" placeholder="From notifiarr.com">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">NZBgeek API Key <span class="optional">(optional)</span></label>
+                    <input class="form-input" data-key="nzbgeek_api_key" type="text" placeholder="Usenet indexer">
+                </div>
+            </div>
+
+            <div class="mt-16">
+                <div class="toggle-wrap">
+                    <label class="toggle">
+                        <input type="checkbox" data-key="migrate_library" onchange="toggleMigration()">
+                        <span class="toggle-track"></span>
+                        <span class="toggle-thumb"></span>
+                    </label>
+                    <span class="toggle-label">Import existing media library</span>
+                </div>
+            </div>
+
+            <div id="migration-fields" class="hidden mt-16">
+                <div class="form-group" id="migrate-local">
+                    <label class="form-label">Migration Source Path</label>
+                    <input class="form-input" data-key="migrate_source" type="text" value="/mnt/external/media">
+                </div>
+                <div class="form-group hidden" id="migrate-nas">
+                    <label class="form-label">Migration NAS Export</label>
+                    <input class="form-input" data-key="migrate_nas_export" type="text" value="/var/nfs/shared/old-media">
+                </div>
+            </div>
+
+            <div class="step-nav">
+                <button class="btn btn-secondary" onclick="prevStep()">Back</button>
+                <button class="btn btn-primary" onclick="nextStep()">Continue</button>
+            </div>
+        </div>
+
+        <!-- ── Step 6: Notifications ───────────────────────────────── -->
+        <div class="step-panel card hidden" data-step="6">
+            <div class="card-title">Notifications</div>
+            <div class="card-subtitle">Discord alerts for updates, downloads, and monitoring</div>
+
+            <div class="form-group">
+                <label class="form-label">Discord Webhook URL <span class="optional">(optional)</span></label>
+                <input class="form-input" data-key="discord_webhook_url" type="text" placeholder="https://discord.com/api/webhooks/..." oninput="updateWatchtower()">
+                <div class="form-help">Server Settings &rarr; Integrations &rarr; Webhooks</div>
+            </div>
+
+            <div class="form-group mt-16">
+                <label class="form-label">Watchtower Notification URL</label>
+                <input class="form-input" data-key="watchtower_notification_url" type="text" readonly id="watchtower-url">
+                <div class="form-help">Auto-derived from Discord webhook (shoutrrr format)</div>
+            </div>
+
+            <div class="step-nav">
+                <button class="btn btn-secondary" onclick="prevStep()">Back</button>
+                <button class="btn btn-primary" onclick="nextStep()">Continue</button>
+            </div>
+        </div>
+
+        <!-- ── Step 7: Review & Deploy ─────────────────────────────── -->
+        <div class="step-panel card hidden" data-step="7">
+            <div class="card-title">Review &amp; Deploy</div>
+            <div class="card-subtitle">Verify your configuration before deploying</div>
+
+            <div class="summary-grid" id="review-summary"></div>
+
+            <div class="mt-24" id="ssh-key-section">
+                <div class="flex items-center justify-between mb-8">
+                    <span class="form-label" style="margin:0">SSH Key Setup</span>
+                    <span id="ssh-key-status"></span>
+                </div>
+                <button class="btn btn-secondary" id="ssh-setup-btn" onclick="setupSSHKeys()">Generate &amp; Deploy Keys</button>
+            </div>
+
+            <div class="step-nav">
+                <button class="btn btn-secondary" onclick="prevStep()">Back</button>
+                <button class="btn btn-primary" id="deploy-btn" onclick="startDeploy()" disabled>Deploy</button>
+            </div>
+        </div>
+
+        <!-- ── Step 8: Deploy Progress ─────────────────────────────── -->
+        <div class="step-panel hidden" data-step="8" style="width:100%">
+            <div class="card mb-16">
+                <div class="flex items-center justify-between mb-16">
+                    <div class="card-title" style="margin:0">Deploying...</div>
+                    <button class="btn btn-sm btn-danger" id="cancel-btn" onclick="cancelDeploy()">Cancel</button>
+                </div>
+
+                <div id="progress-bars">
+                    <div class="progress-group" id="progress-plex">
+                        <div class="progress-label">
+                            <span>Spyglass (Plex)</span>
+                            <span id="progress-plex-text">Waiting...</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progress-plex-bar" style="width:0%"></div>
+                        </div>
+                    </div>
+                    <div class="progress-group" id="progress-arr">
+                        <div class="progress-label">
+                            <span>Privateer (*arr)</span>
+                            <span id="progress-arr-text">Waiting...</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progress-arr-bar" style="width:0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="terminal">
+                <div class="terminal-header">
+                    <div class="terminal-tabs" id="terminal-tabs">
+                        <button class="terminal-tab active" data-machine="all" onclick="switchTerminalTab('all')">
+                            All
+                        </button>
+                        <button class="terminal-tab" data-machine="Spyglass" onclick="switchTerminalTab('Spyglass')">
+                            <span class="tab-dot running" id="tab-dot-plex"></span>Spyglass
+                        </button>
+                        <button class="terminal-tab" data-machine="Privateer" onclick="switchTerminalTab('Privateer')">
+                            <span class="tab-dot running" id="tab-dot-arr"></span>Privateer
+                        </button>
+                    </div>
+                    <div class="terminal-controls">
+                        <button class="btn-icon" id="scroll-lock-btn" onclick="toggleScrollLock()" title="Auto-scroll">&#8681;</button>
+                    </div>
+                </div>
+                <div class="terminal-body" id="terminal-body"></div>
+            </div>
+        </div>
+
+        <!-- ── Step 9: Post-Deploy Report ──────────────────────────── -->
+        <div class="step-panel hidden" data-step="9" style="width:100%">
+            <div class="card mb-16">
+                <div class="card-title">Deployment Complete</div>
+                <div class="card-subtitle" id="deploy-result-msg"></div>
+            </div>
+
+            <div class="card mb-16" id="services-plex-card">
+                <div class="card-title" style="font-size:14px">Spyglass Services</div>
+                <div class="service-grid" id="services-plex"></div>
+            </div>
+
+            <div class="card mb-16" id="services-arr-card">
+                <div class="card-title" style="font-size:14px">Privateer Services</div>
+                <div class="service-grid" id="services-arr"></div>
+            </div>
+
+            <div class="card mb-16" id="postdeploy-section">
+                <div class="card-title" style="font-size:14px">Post-Deploy Status</div>
+                <div id="postdeploy-log"></div>
+            </div>
+
+            <div class="card mb-16">
+                <div class="card-title" style="font-size:14px">Still Needs Your Eyeballs</div>
+                <ul class="checklist" id="manual-checklist">
+                    <li>
+                        <span class="checklist-icon pending">&#9744;</span>
+                        <span>Sign into Plex at <strong>plex.tv/web</strong> and add your media libraries</span>
+                    </li>
+                    <li>
+                        <span class="checklist-icon pending">&#9744;</span>
+                        <span>Sign into Overseerr with your Plex account (Plex OAuth)</span>
+                    </li>
+                    <li>
+                        <span class="checklist-icon pending">&#9744;</span>
+                        <span>Tautulli &rarr; Settings &rarr; Notification Agents &rarr; Add Discord webhook</span>
+                    </li>
+                    <li>
+                        <span class="checklist-icon pending">&#9744;</span>
+                        <span>Uptime Kuma &rarr; Add monitors for each service</span>
+                    </li>
+                    <li>
+                        <span class="checklist-icon pending">&#9744;</span>
+                        <span>Immich &rarr; Complete first-run wizard and create admin account</span>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="step-nav">
+                <button class="btn btn-secondary" onclick="goToStep(7)">Re-deploy</button>
+                <button class="btn btn-primary" onclick="window.location.reload()">Start Over</button>
+            </div>
+        </div>
+
+    </div><!-- /main -->
+
+    <!-- Trakt Auth Modal -->
+    <div class="modal-backdrop hidden" id="trakt-modal">
+        <div class="modal">
+            <div class="modal-title">Authorize Trakt</div>
+            <div class="modal-body">
+                <p>Visit this URL and enter the code:</p>
+                <p><a href="" target="_blank" id="trakt-url" style="color:var(--accent)"></a></p>
+                <div class="device-code" id="trakt-code"></div>
+                <p class="text-sm text-muted mt-8" id="trakt-modal-status">Waiting for authorization...</p>
+            </div>
+            <button class="btn btn-secondary" onclick="closeTraktModal()">Cancel</button>
+        </div>
+    </div>
+
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
