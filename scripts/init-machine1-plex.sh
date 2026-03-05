@@ -584,12 +584,13 @@ if [ "$TDARR_READY" = true ]; then
         {"_id":"plugin3","id":"Tdarr_Plugin_MC93_Migz3CleanAudio","checked":true,"source":"Community","priority":2,"InputsDB":{"language":"eng,und","commentary":"true","tag_language":"eng","tag_title":"true"}},
         {"_id":"plugin4","id":"Tdarr_Plugin_MC93_Migz4CleanSubs","checked":true,"source":"Community","priority":3,"InputsDB":{"language":"eng,und","commentary":"true","tag_language":"eng"}},
         {"_id":"plugin5","id":"Tdarr_Plugin_MC93_Migz5ConvertAudio","checked":true,"source":"Community","priority":4,"InputsDB":{"aac_stereo":"true","downmix":"true"}},
-        {"_id":"plugin6","id":"Tdarr_Plugin_bsh1_Boosh_FFMPEG_QSV_HEVC","checked":true,"source":"Community","priority":5,"InputsDB":{"container":"mkv","encoder":"hevc","target_bitrate_modifier":"0.5","encoder_speedpreset":"slow","enable_10bit":"false","reconvert_hevc":"false"}},
+        {"_id":"plugin6","id":"Tdarr_Plugin_bsh1_Boosh_FFMPEG_QSV_HEVC","checked":true,"source":"Community","priority":5,"InputsDB":{"container":"mkv","encoder":"hevc_qsv","target_bitrate_modifier":"0.5","encoder_speedpreset":"slow","enable_10bit":"false","reconvert_hevc":"true","hevc_max_bitrate":"30000","bitrate_cutoff":"3000","max_average_bitrate":"20000","min_average_bitrate":"4000"}},
         {"_id":"plugin7","id":"Tdarr_Plugin_MC93_Migz6OrderStreams","checked":true,"source":"Community","priority":6,"InputsDB":{}}
     ]'
 
-    # Decision maker — use plugin-based decisions, skip files already in HEVC
-    TDARR_DECISION='{"settingsPlugin":true,"settingsFlows":false,"settingsVideo":false,"videoExcludeSwitch":true,"video_codec_names_exclude":[{"codec":"hevc","checked":true},{"codec":"h264","checked":false}],"video_size_range_include":{"min":0,"max":100000},"video_height_range_include":{"min":0,"max":3000},"video_width_range_include":{"min":0,"max":4000},"settingsAudio":false,"audioExcludeSwitch":true,"audio_codec_names_exclude":[{"codec":"mp3","checked":true},{"codec":"aac","checked":false}],"audio_size_range_include":{"min":0,"max":10}}'
+    # Decision maker — video codec filter routes H.264/MPEG4/VC1 to transcode queue,
+    # skips HEVC/AV1/VP9 (already efficient). Plugin stack handles the actual decisions.
+    TDARR_DECISION='{"settingsPlugin":true,"settingsFlows":false,"settingsVideo":true,"videoExcludeSwitch":true,"video_codec_names_exclude":[{"codec":"hevc","checked":true},{"codec":"av1","checked":true},{"codec":"vp9","checked":true},{"codec":"h264","checked":false},{"codec":"mpeg4","checked":false},{"codec":"vc1","checked":false},{"codec":"mpeg2video","checked":false}],"video_size_range_include":{"min":0,"max":100000},"video_height_range_include":{"min":0,"max":3000},"video_width_range_include":{"min":0,"max":4000},"settingsAudio":false,"audioExcludeSwitch":true,"audio_codec_names_exclude":[{"codec":"mp3","checked":true},{"codec":"aac","checked":false}],"audio_size_range_include":{"min":0,"max":10}}'
 
     # Schedule: all hours enabled (object format required by UI)
     TDARR_SCHEDULE='['
@@ -694,8 +695,8 @@ if [ "$TDARR_READY" = true ]; then
         # Set worker limits
         curl -sf -X POST "${TDARR_URL}/api/v2/cruddb" \
             -H "Content-Type: application/json" \
-            -d "{\"data\":{\"collection\":\"NodeJSONDB\",\"mode\":\"update\",\"docID\":\"${NODE_ID}\",\"obj\":{\"workerLimits\":{\"transcodegpu\":1,\"healthcheckcpu\":1,\"transcodecpu\":0,\"healthcheckgpu\":0}}}}" > /dev/null 2>&1 && \
-            log "  Tdarr node '${NODE_ID}': 1 GPU transcode + 1 CPU healthcheck worker"
+            -d "{\"data\":{\"collection\":\"NodeJSONDB\",\"mode\":\"update\",\"docID\":\"${NODE_ID}\",\"obj\":{\"workerLimits\":{\"transcodegpu\":1,\"healthcheckcpu\":1,\"transcodecpu\":0,\"healthcheckgpu\":0},\"allowGpuDoCpu\":true}}}" > /dev/null 2>&1 && \
+            log "  Tdarr node '${NODE_ID}': 1 GPU transcode + 1 CPU healthcheck worker (GPU does CPU tasks)"
 
         # Set node schedule — per-hour worker counts (overrides workerLimits per time slot)
         # Without this, all hours default to 0 workers and nothing processes

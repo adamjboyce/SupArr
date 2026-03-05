@@ -307,6 +307,11 @@ services:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 524288
+    mem_limit: 2g
     ports: ["6969:6969"]
     volumes:
       - ${APPDATA}/whisparr/config:/config
