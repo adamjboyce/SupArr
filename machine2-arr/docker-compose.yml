@@ -45,6 +45,7 @@ services:
       - WIREGUARD_PRIVATE_KEY=${NORD_WIREGUARD_KEY:-}
       - WIREGUARD_PERSISTENT_KEEPALIVE_INTERVAL=25s
       - FIREWALL_OUTBOUND_SUBNETS=${LOCAL_SUBNET:-192.168.1.0/24}
+      - FIREWALL_VPN_INPUT_PORTS=6881
       - DNS_SERVER=off
       - HEALTH_SUCCESS_WAIT_DURATION=10s
     ports:
@@ -99,7 +100,7 @@ services:
     volumes:
       - ${APPDATA}/sabnzbd/config:/config
       - ${DOWNLOADS_ROOT}/usenet:/downloads/usenet
-      - ${APPDATA}/downloads/usenet-incomplete:/downloads/usenet/incomplete
+      - ${APPDATA}/downloads/usenet-incomplete:/incomplete
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8085 || exit 1"]
       interval: 60s
