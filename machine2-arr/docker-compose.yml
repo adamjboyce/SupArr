@@ -379,10 +379,11 @@ services:
       retries: 3
       start_period: 15s
 
-  # ── Migration Tool (stop after library import is done) ─────────────────────
+  # ── Migration Tools (profile-gated — only run during library import) ──────
   filebot:
     image: jlesage/filebot:latest
     container_name: filebot
+    profiles: ["migration"]
     restart: unless-stopped
     environment:
       - USER_ID=${PUID}
