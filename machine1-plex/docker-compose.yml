@@ -65,6 +65,10 @@ services:
       resources:
         limits:
           cpus: "2.0"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 524288
     devices:
       - /dev/dri:/dev/dri
     environment:
@@ -116,25 +120,24 @@ services:
       - ${APPDATA}/kometa/config:/config
     networks: [media-net]
 
-  overseerr:
-    image: linuxserver/overseerr:latest
-    container_name: overseerr
+  seerr:
+    image: ghcr.io/seerr-team/seerr:latest
+    container_name: seerr
     restart: unless-stopped
+    init: true
     environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
       - TZ=${TZ}
     ports:
       - "5055:5055"
     volumes:
-      - ${APPDATA}/overseerr/config:/config
+      - ${APPDATA}/overseerr/config:/app/config
     networks: [media-net]
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:5055/api/v1/status || exit 1"]
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 60s
 
   tautulli:
     image: linuxserver/tautulli:latest
