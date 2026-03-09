@@ -584,13 +584,18 @@ if [ "$TDARR_READY" = true ]; then
         {"_id":"plugin3","id":"Tdarr_Plugin_MC93_Migz3CleanAudio","checked":true,"source":"Community","priority":2,"InputsDB":{"language":"eng,und","commentary":"true","tag_language":"eng","tag_title":"true"}},
         {"_id":"plugin4","id":"Tdarr_Plugin_MC93_Migz4CleanSubs","checked":true,"source":"Community","priority":3,"InputsDB":{"language":"eng,und","commentary":"true","tag_language":"eng"}},
         {"_id":"plugin5","id":"Tdarr_Plugin_MC93_Migz5ConvertAudio","checked":true,"source":"Community","priority":4,"InputsDB":{"aac_stereo":"true","downmix":"true"}},
-        {"_id":"plugin6","id":"Tdarr_Plugin_bsh1_Boosh_FFMPEG_QSV_HEVC","checked":true,"source":"Community","priority":5,"InputsDB":{"container":"mkv","encoder":"hevc_qsv","target_bitrate_modifier":"0.5","encoder_speedpreset":"slow","enable_10bit":"false","reconvert_hevc":"true","hevc_max_bitrate":"30000","bitrate_cutoff":"3000","max_average_bitrate":"20000","min_average_bitrate":"4000"}},
+        {"_id":"plugin6","id":"Tdarr_Plugin_bsh1_Boosh_FFMPEG_QSV_HEVC","checked":true,"source":"Community","priority":5,"InputsDB":{"container":"mkv","encoder":"hevc_qsv","target_bitrate_modifier":"0.5","encoder_speedpreset":"slow","enable_10bit":"false","reconvert_hevc":"true","hevc_max_bitrate":"30000","bitrate_cutoff":"4000","max_average_bitrate":"20000","min_average_bitrate":"4000"}},
         {"_id":"plugin7","id":"Tdarr_Plugin_MC93_Migz6OrderStreams","checked":true,"source":"Community","priority":6,"InputsDB":{}}
     ]'
 
     # Decision maker — video codec filter routes H.264/MPEG4/VC1 to transcode queue,
-    # skips HEVC/AV1/VP9 (already efficient). Plugin stack handles the actual decisions.
-    TDARR_DECISION='{"settingsPlugin":true,"settingsFlows":false,"settingsVideo":true,"videoExcludeSwitch":true,"video_codec_names_exclude":[{"codec":"hevc","checked":true},{"codec":"av1","checked":true},{"codec":"vp9","checked":true},{"codec":"h264","checked":false},{"codec":"mpeg4","checked":false},{"codec":"vc1","checked":false},{"codec":"mpeg2video","checked":false}],"video_size_range_include":{"min":0,"max":100000},"video_height_range_include":{"min":0,"max":3000},"video_width_range_include":{"min":0,"max":4000},"settingsAudio":false,"audioExcludeSwitch":true,"audio_codec_names_exclude":[{"codec":"mp3","checked":true},{"codec":"aac","checked":false}],"audio_size_range_include":{"min":0,"max":10}}'
+    # skips HEVC/AV1/VP9 (already efficient). settingsPlugin=true keeps video filter
+    # active, settingsFlows=true routes processing through Flows (not classic stack).
+    # Classic plugin stacks have a known finalization bug (Issue #1133) — Flows fix it.
+    TDARR_DECISION='{"settingsPlugin":true,"settingsFlows":true,"settingsVideo":true,"videoExcludeSwitch":true,"video_codec_names_exclude":[{"codec":"hevc","checked":true},{"codec":"av1","checked":true},{"codec":"vp9","checked":true},{"codec":"h264","checked":false},{"codec":"mpeg4","checked":false},{"codec":"vc1","checked":false},{"codec":"mpeg2video","checked":false}],"video_size_range_include":{"min":0,"max":100000},"video_height_range_include":{"min":0,"max":3000},"video_width_range_include":{"min":0,"max":4000},"settingsAudio":false,"audioExcludeSwitch":true,"audio_codec_names_exclude":[{"codec":"mp3","checked":true},{"codec":"aac","checked":false}],"audio_size_range_include":{"min":0,"max":10}}'
+
+    # Flow ID — created in FlowsJSONDB below, referenced by each library
+    TDARR_FLOW_ID="suparr_qsv_hevc"
 
     # Schedule: all hours enabled (object format required by UI)
     TDARR_SCHEDULE='['
@@ -620,6 +625,7 @@ if [ "$TDARR_READY" = true ]; then
             --arg id "$lib_id" \
             --arg name "$name" \
             --arg folder "$folder" \
+            --arg flowId "$TDARR_FLOW_ID" \
             --argjson plugins "$TDARR_PLUGINS" \
             --argjson decision "$TDARR_DECISION" \
             --argjson schedule "$TDARR_SCHEDULE" \
@@ -632,6 +638,7 @@ if [ "$TDARR_READY" = true ]; then
                         _id: $id,
                         name: $name,
                         folder: $folder,
+                        flowId: $flowId,
                         cache: "/temp",
                         output: ".",
                         container: ".mkv",
@@ -677,7 +684,26 @@ if [ "$TDARR_READY" = true ]; then
             warn "  Could not create Tdarr library '${name}'"
     }
 
-    info "Creating Tdarr libraries with QSV plugin stack..."
+    # Create the Tdarr Flow — wraps classic plugins in Flow framework for reliable
+    # file replacement (node handles file ops instead of server, fixing Issue #1133)
+    EXISTING_FLOWS=$(curl -sf -X POST "${TDARR_URL}/api/v2/cruddb" \
+        -H "Content-Type: application/json" \
+        -d '{"data":{"collection":"FlowsJSONDB","mode":"getAll"}}' 2>/dev/null || echo "[]")
+    if echo "$EXISTING_FLOWS" | jq -e ".[] | select(._id == \"${TDARR_FLOW_ID}\")" > /dev/null 2>&1; then
+        log "  Tdarr flow '${TDARR_FLOW_ID}' already exists"
+    else
+        FLOW_PAYLOAD=$(cat << 'FLOWJSON'
+{"data":{"collection":"FlowsJSONDB","mode":"insert","docID":"suparr_qsv_hevc","obj":{"_id":"suparr_qsv_hevc","name":"SupArr QSV HEVC Pipeline","description":"Migz cleanup + Boosh QSV HEVC transcode with file replacement","flowPlugins":[{"name":"Input File","sourceRepo":"Community","pluginName":"inputFile","version":"1.0.0","id":"sa_input","position":{"x":500,"y":50}},{"name":"Migz1 Remux to MKV","sourceRepo":"Community","pluginName":"runClassicTranscodePlugin","version":"2.0.0","id":"sa_migz1","inputsDB":{"pluginSourceId":"Community:Tdarr_Plugin_MC93_Migz1Remux","container":"mkv","force_conform":"false"},"position":{"x":500,"y":150}},{"name":"Migz2 Clean Titles","sourceRepo":"Community","pluginName":"runClassicTranscodePlugin","version":"2.0.0","id":"sa_migz2","inputsDB":{"pluginSourceId":"Community:Tdarr_Plugin_MC93_Migz2CleanTitle","clean_audio":"true","clean_subtitles":"true"},"position":{"x":500,"y":250}},{"name":"Migz3 Clean Audio","sourceRepo":"Community","pluginName":"runClassicTranscodePlugin","version":"2.0.0","id":"sa_migz3","inputsDB":{"pluginSourceId":"Community:Tdarr_Plugin_MC93_Migz3CleanAudio","language":"eng,und","commentary":"true","tag_language":"eng","tag_title":"true"},"position":{"x":500,"y":350}},{"name":"Migz4 Clean Subs","sourceRepo":"Community","pluginName":"runClassicTranscodePlugin","version":"2.0.0","id":"sa_migz4","inputsDB":{"pluginSourceId":"Community:Tdarr_Plugin_MC93_Migz4CleanSubs","language":"eng,und","commentary":"true","tag_language":"eng"},"position":{"x":500,"y":450}},{"name":"Migz5 Convert Audio","sourceRepo":"Community","pluginName":"runClassicTranscodePlugin","version":"2.0.0","id":"sa_migz5","inputsDB":{"pluginSourceId":"Community:Tdarr_Plugin_MC93_Migz5ConvertAudio","aac_stereo":"true","downmix":"true"},"position":{"x":500,"y":550}},{"name":"Boosh QSV HEVC Transcode","sourceRepo":"Community","pluginName":"runClassicTranscodePlugin","version":"2.0.0","id":"sa_boosh","inputsDB":{"pluginSourceId":"Community:Tdarr_Plugin_bsh1_Boosh_FFMPEG_QSV_HEVC","container":"mkv","encoder":"hevc_qsv","target_bitrate_modifier":"0.5","encoder_speedpreset":"slow","enable_10bit":"false","reconvert_hevc":"true","hevc_max_bitrate":"30000","bitrate_cutoff":"4000","max_average_bitrate":"20000","min_average_bitrate":"4000"},"position":{"x":500,"y":650}},{"name":"Migz6 Order Streams","sourceRepo":"Community","pluginName":"runClassicTranscodePlugin","version":"2.0.0","id":"sa_migz6","inputsDB":{"pluginSourceId":"Community:Tdarr_Plugin_MC93_Migz6OrderStreams"},"position":{"x":500,"y":750}},{"name":"Replace Original File","sourceRepo":"Community","pluginName":"replaceOriginalFile","version":"1.0.0","id":"sa_replace","position":{"x":500,"y":850}}],"flowEdges":[{"source":"sa_input","sourceHandle":"1","target":"sa_migz1","targetHandle":null,"id":"e_in_m1"},{"source":"sa_migz1","sourceHandle":"1","target":"sa_migz2","targetHandle":null,"id":"e_m1_m2_1"},{"source":"sa_migz1","sourceHandle":"2","target":"sa_migz2","targetHandle":null,"id":"e_m1_m2_2"},{"source":"sa_migz2","sourceHandle":"1","target":"sa_migz3","targetHandle":null,"id":"e_m2_m3_1"},{"source":"sa_migz2","sourceHandle":"2","target":"sa_migz3","targetHandle":null,"id":"e_m2_m3_2"},{"source":"sa_migz3","sourceHandle":"1","target":"sa_migz4","targetHandle":null,"id":"e_m3_m4_1"},{"source":"sa_migz3","sourceHandle":"2","target":"sa_migz4","targetHandle":null,"id":"e_m3_m4_2"},{"source":"sa_migz4","sourceHandle":"1","target":"sa_migz5","targetHandle":null,"id":"e_m4_m5_1"},{"source":"sa_migz4","sourceHandle":"2","target":"sa_migz5","targetHandle":null,"id":"e_m4_m5_2"},{"source":"sa_migz5","sourceHandle":"1","target":"sa_boosh","targetHandle":null,"id":"e_m5_bo_1"},{"source":"sa_migz5","sourceHandle":"2","target":"sa_boosh","targetHandle":null,"id":"e_m5_bo_2"},{"source":"sa_boosh","sourceHandle":"1","target":"sa_migz6","targetHandle":null,"id":"e_bo_m6_1"},{"source":"sa_boosh","sourceHandle":"2","target":"sa_migz6","targetHandle":null,"id":"e_bo_m6_2"},{"source":"sa_migz6","sourceHandle":"1","target":"sa_replace","targetHandle":null,"id":"e_m6_rp_1"},{"source":"sa_migz6","sourceHandle":"2","target":"sa_replace","targetHandle":null,"id":"e_m6_rp_2"}]}}}
+FLOWJSON
+)
+        curl -sf -X POST "${TDARR_URL}/api/v2/cruddb" \
+            -H "Content-Type: application/json" \
+            -d "$FLOW_PAYLOAD" > /dev/null 2>&1 && \
+            log "  Tdarr flow '${TDARR_FLOW_ID}' created" || \
+            warn "  Could not create Tdarr flow"
+    fi
+
+    info "Creating Tdarr libraries with QSV flow pipeline..."
     create_tdarr_library "Movies"        "/movies"
     create_tdarr_library "TV Shows"      "/tv"
     create_tdarr_library "Anime"         "/anime"
