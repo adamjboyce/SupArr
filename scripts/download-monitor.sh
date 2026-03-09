@@ -13,6 +13,8 @@
 #     dead). Removes from qBit directly.
 #     - metaDL (stuck downloading metadata) > META_THRESHOLD_HOURS
 #     - stalledDL with 0 seeds and 0 availability > DEAD_THRESHOLD_HOURS
+#     - stalledDL at >=99% progress with 0 seeds > STUCK_COMPLETE_THRESHOLD_HOURS
+#       (force recheck first, purge if still stuck next cycle)
 #     - missingFiles (orphaned torrents with deleted data)
 #
 # Removing dead torrents frees active slots for healthy ones. *arr apps detect
@@ -27,6 +29,7 @@ set -euo pipefail
 STALL_THRESHOLD_HOURS="${STALL_THRESHOLD_HOURS:-6}"
 META_THRESHOLD_HOURS="${META_THRESHOLD_HOURS:-12}"
 DEAD_THRESHOLD_HOURS="${DEAD_THRESHOLD_HOURS:-24}"
+STUCK_COMPLETE_THRESHOLD_HOURS="${STUCK_COMPLETE_THRESHOLD_HOURS:-24}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-3600}"
 DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
 QBIT_URL="${QBIT_URL:-http://gluetun:8080}"
@@ -162,6 +165,8 @@ qbit_api() {
     curl -sf -b "$QBIT_COOKIE_FILE" "${QBIT_URL}/api/v2${endpoint}" "$@" 2>/dev/null
 }
 
+RECHECK_TRACKING_FILE="/tmp/rechecked_hashes"
+
 clean_qbit() {
     # Login if needed
     qbit_login || { warn "qBit: login failed, skipping direct cleanup"; return; }
@@ -181,15 +186,22 @@ clean_qbit() {
     local missing_removed=0
     local removed_names=""
 
+    # Load previously rechecked hashes, then clear for this cycle
+    touch "$RECHECK_TRACKING_FILE"
+    local prev_rechecked
+    prev_rechecked=$(cat "$RECHECK_TRACKING_FILE")
+    : > "${RECHECK_TRACKING_FILE}.new"
+
     # Process each torrent
     echo "$torrents" | jq -c '.[]' | while read -r torrent; do
-        local state name hash added_on seeds avail
+        local state name hash added_on seeds avail progress
         state=$(echo "$torrent" | jq -r '.state')
         name=$(echo "$torrent" | jq -r '.name')
         hash=$(echo "$torrent" | jq -r '.hash')
         added_on=$(echo "$torrent" | jq -r '.added_on')
         seeds=$(echo "$torrent" | jq -r '.num_complete // 0')
         avail=$(echo "$torrent" | jq -r '.availability // 0')
+        progress=$(echo "$torrent" | jq -r '.progress // 0')
 
         local age_h=$(( (now - added_on) / 3600 ))
 
@@ -213,6 +225,25 @@ clean_qbit() {
             fi
         fi
 
+        # Stuck complete — stalledDL at >=99% with 0 seeds
+        # These often have stale piece maps. Recheck first, purge next cycle.
+        if [ "$state" = "stalledDL" ] && [ "$seeds" -eq 0 ] && [ "$age_h" -ge "$STUCK_COMPLETE_THRESHOLD_HOURS" ]; then
+            local progress_pct
+            progress_pct=$(echo "$progress" | awk '{printf "%d", $1 * 100}')
+            if [ "${progress_pct:-0}" -ge 99 ]; then
+                if echo "$prev_rechecked" | grep -qxF "$hash"; then
+                    # Already rechecked last cycle, still stuck — purge
+                    should_remove=true
+                    reason="stuck complete after recheck (${progress_pct}%, 0 seeds, ${age_h}h)"
+                else
+                    # First time seeing this — force recheck, track for next cycle
+                    info "qBit: force recheck [${progress_pct}%, 0 seeds, ${age_h}h]: ${name:0:70}"
+                    qbit_api "/torrents/recheck" -d "hashes=${hash}" > /dev/null 2>&1
+                    echo "$hash" >> "${RECHECK_TRACKING_FILE}.new"
+                fi
+            fi
+        fi
+
         # Missing files — orphaned torrent
         if [ "$state" = "missingFiles" ]; then
             should_remove=true
@@ -224,6 +255,9 @@ clean_qbit() {
             qbit_api "/torrents/delete" -d "hashes=${hash}&deleteFiles=true" > /dev/null 2>&1
         fi
     done
+
+    # Update recheck tracking — only keep hashes from this cycle
+    mv "${RECHECK_TRACKING_FILE}.new" "$RECHECK_TRACKING_FILE" 2>/dev/null || true
 
     # Count what was removed (re-fetch and compare)
     local after_count
@@ -250,7 +284,7 @@ fi
 log "Download monitor started"
 [ ${#APPS[@]} -gt 0 ] && log "Layer 1 (*arr): ${APPS[*]}"
 log "Layer 2 (qBit): ${QBIT_URL}"
-log "Thresholds — *arr stall: ${STALL_THRESHOLD_HOURS}h | metadata: ${META_THRESHOLD_HOURS}h | dead: ${DEAD_THRESHOLD_HOURS}h"
+log "Thresholds — *arr stall: ${STALL_THRESHOLD_HOURS}h | metadata: ${META_THRESHOLD_HOURS}h | dead: ${DEAD_THRESHOLD_HOURS}h | stuck complete: ${STUCK_COMPLETE_THRESHOLD_HOURS}h"
 log "Check interval: ${CHECK_INTERVAL}s"
 
 while true; do
