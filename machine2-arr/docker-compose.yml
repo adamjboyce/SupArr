@@ -70,6 +70,8 @@ services:
     network_mode: "service:gluetun"
     depends_on:
       gluetun: { condition: service_healthy }
+    labels:
+      - "autoheal=true"
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -80,11 +82,11 @@ services:
       - ${DOWNLOADS_ROOT}/torrents:/downloads/torrents
       - ${APPDATA}/downloads/torrent-incomplete:/downloads/torrents/incomplete
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080 || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080 && ping -c 1 -W 5 1.1.1.1 || exit 1"]
       interval: 60s
-      timeout: 10s
+      timeout: 15s
       retries: 3
-      start_period: 30s
+      start_period: 90s
 
   sabnzbd:
     image: linuxserver/sabnzbd:latest
@@ -93,6 +95,8 @@ services:
     network_mode: "service:gluetun"
     depends_on:
       gluetun: { condition: service_healthy }
+    labels:
+      - "autoheal=true"
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -102,11 +106,11 @@ services:
       - ${DOWNLOADS_ROOT}/usenet:/downloads/usenet
       - ${APPDATA}/downloads/usenet-incomplete:/incomplete
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8085 || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8085 && ping -c 1 -W 5 1.1.1.1 || exit 1"]
       interval: 60s
-      timeout: 10s
+      timeout: 15s
       retries: 3
-      start_period: 30s
+      start_period: 90s
 
   unpackerr:
     image: golift/unpackerr:latest
@@ -468,6 +472,21 @@ services:
     networks: [arr-net]
 
   # ── Maintenance ────────────────────────────────────────────────────────────
+  autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: autoheal
+    restart: unless-stopped
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=60
+      - AUTOHEAL_START_PERIOD=120
+      - AUTOHEAL_DEFAULT_STOP_TIMEOUT=10
+      - DOCKER_SOCK=/var/run/docker.sock
+      - TZ=${TZ}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [arr-net]
+
   watchtower:
     image: containrrr/watchtower:latest
     container_name: watchtower-privateer
