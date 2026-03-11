@@ -30,6 +30,7 @@ STALL_THRESHOLD_HOURS="${STALL_THRESHOLD_HOURS:-6}"
 META_THRESHOLD_HOURS="${META_THRESHOLD_HOURS:-12}"
 DEAD_THRESHOLD_HOURS="${DEAD_THRESHOLD_HOURS:-24}"
 STUCK_COMPLETE_THRESHOLD_HOURS="${STUCK_COMPLETE_THRESHOLD_HOURS:-24}"
+ZOMBIE_THRESHOLD_HOURS="${ZOMBIE_THRESHOLD_HOURS:-48}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-3600}"
 DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
 QBIT_URL="${QBIT_URL:-http://gluetun:8080}"
@@ -225,6 +226,19 @@ clean_qbit() {
             fi
         fi
 
+        # Zombie — stalledDL with tracker-reported seeds but 0 bytes downloaded
+        # Tracker says seeds exist, but nobody is actually serving data.
+        if [ "$state" = "stalledDL" ] && [ "$age_h" -ge "$ZOMBIE_THRESHOLD_HOURS" ] && [ "$should_remove" = "false" ]; then
+            local downloaded
+            downloaded=$(echo "$torrent" | jq -r '.downloaded // 0')
+            local dlspeed
+            dlspeed=$(echo "$torrent" | jq -r '.dlspeed // 0')
+            if [ "$downloaded" -eq 0 ] && [ "$dlspeed" -eq 0 ]; then
+                should_remove=true
+                reason="zombie (${age_h}h stalled, 0 bytes downloaded despite ${seeds} tracker seeds)"
+            fi
+        fi
+
         # Stuck complete — stalledDL at >=99% with 0 seeds
         # These often have stale piece maps. Recheck first, purge next cycle.
         if [ "$state" = "stalledDL" ] && [ "$seeds" -eq 0 ] && [ "$age_h" -ge "$STUCK_COMPLETE_THRESHOLD_HOURS" ]; then
@@ -241,6 +255,20 @@ clean_qbit() {
                     qbit_api "/torrents/recheck" -d "hashes=${hash}" > /dev/null 2>&1
                     echo "$hash" >> "${RECHECK_TRACKING_FILE}.new"
                 fi
+            fi
+        fi
+
+        # Abandoned — partially downloaded but no seeders, no speed, will never finish
+        # Catches torrents the dead check misses (those with non-zero availability
+        # from leecher pieces but no complete seed in the swarm).
+        if [ "$state" = "stalledDL" ] && [ "$seeds" -eq 0 ] && [ "$age_h" -ge "$DEAD_THRESHOLD_HOURS" ] && [ "$should_remove" = "false" ]; then
+            local dlspeed_chk
+            dlspeed_chk=$(echo "$torrent" | jq -r '.dlspeed // 0')
+            if [ "$dlspeed_chk" -eq 0 ]; then
+                local progress_pct_ab
+                progress_pct_ab=$(echo "$progress" | awk '{printf "%d", $1 * 100}')
+                should_remove=true
+                reason="abandoned (0 seeds, 0 speed, ${progress_pct_ab}% done, ${age_h}h)"
             fi
         fi
 
@@ -282,9 +310,9 @@ if [ ${#APPS[@]} -eq 0 ] && [ -z "${QBIT_URL:-}" ]; then
 fi
 
 log "Download monitor started"
-[ ${#APPS[@]} -gt 0 ] && log "Layer 1 (*arr): ${APPS[*]}"
+[ ${#APPS[@]} -gt 0 ] && log "Layer 1 (*arr): $(printf '%s\n' "${APPS[@]}" | cut -d: -f1 | tr '\n' ' ')"
 log "Layer 2 (qBit): ${QBIT_URL}"
-log "Thresholds — *arr stall: ${STALL_THRESHOLD_HOURS}h | metadata: ${META_THRESHOLD_HOURS}h | dead: ${DEAD_THRESHOLD_HOURS}h | stuck complete: ${STUCK_COMPLETE_THRESHOLD_HOURS}h"
+log "Thresholds — *arr stall: ${STALL_THRESHOLD_HOURS}h | metadata: ${META_THRESHOLD_HOURS}h | dead: ${DEAD_THRESHOLD_HOURS}h | zombie: ${ZOMBIE_THRESHOLD_HOURS}h | stuck complete: ${STUCK_COMPLETE_THRESHOLD_HOURS}h"
 log "Check interval: ${CHECK_INTERVAL}s"
 
 while true; do
