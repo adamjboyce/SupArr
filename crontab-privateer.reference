@@ -1,0 +1,24 @@
+# Privateer Crontab Reference — for rebuild
+# Last updated: 2026-03-20
+# NOTE: This is a reference file, not auto-deployed. After rebuild,
+# restore with: crontab crontab-privateer.reference
+
+*/15 * * * * /opt/arr-stack/scripts/disk_guard.sh
+
+# Foundry Prospector Scrapers
+0 8 * * * /opt/foundry/scrapers/run-scraper.sh reddit
+0 9 * * 0 /opt/foundry/scrapers/run-scraper.sh flippa
+
+# SupArr Stack Monitoring
+# NOTE: Set SUPARR_DISCORD_WEBHOOK to your Discord webhook URL
+*/30 * * * * SUPARR_DISCORD_WEBHOOK="<DISCORD_WEBHOOK_URL>" /opt/arr-stack/scripts/arr-health-monitor.sh
+0 6 */3 * * /opt/arr-stack/scripts/arr-trakt-refresh.sh
+
+# SupArr Missing Content Backfill (daily 3 AM, excludes Whisparr)
+0 3 * * * /opt/suparr/scripts/missing-search.sh >> /var/log/suparr-missing-search.log 2>&1
+
+# SupArr Queue Cleanup (every 6 hours)
+0 */6 * * * /opt/suparr/scripts/queue-cleanup.sh >> /var/log/suparr-queue-cleanup.log 2>&1
+
+# SupArr Download Cleanup (daily 4 AM)
+0 4 * * * /opt/suparr/scripts/download-cleanup.sh
