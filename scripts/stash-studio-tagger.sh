@@ -14,7 +14,7 @@
 # Older scenes in /data/{Studio}/ (pre-Whisparr v3) are left alone for
 # studio tagging — those are mostly amateur content without clean paths.
 # =============================================================================
-set -euo pipefail
+set -uo pipefail
 
 STASH_URL="${STASH_URL:-http://stash:9999}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-1800}"  # 30 minutes
@@ -95,15 +95,21 @@ tag_studios() {
     log "Found ${count} untagged scene(s)"
 
     # Build a map: studio_name → [scene_ids]
-    # Path format: /data/scenes/{Network}/{Studio}/{Scene Dir}/file.ext
+    # Two path formats from Whisparr:
+    #   7 parts: /data/scenes/{Network}/{Studio}/{Scene Dir}/file.ext → studio at [4]
+    #   6 parts: /data/scenes/{Studio}/{Scene Dir}/file.ext           → studio at [3]
+    # Detect by checking if [4] starts with a date (YYYY-MM-DD), which means it's
+    # a scene dir, not a studio name.
     local assignments
     assignments=$(echo "$result" | jq -r '
         .data.findScenes.scenes[] |
         . as $scene |
         .files[0].path |
         split("/") |
-        if length >= 5 then
+        if length >= 7 and (.[4] | test("^\\d{4}-\\d{2}-\\d{2}") | not) then
             "\(.[4])\t\($scene.id)"
+        elif length >= 6 then
+            "\(.[3])\t\($scene.id)"
         else
             empty
         end
