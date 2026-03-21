@@ -93,12 +93,16 @@ def get_api_key(arr_name: str) -> str | None:
 def api_call(base: str, key: str, endpoint: str, method: str = "GET", data: dict | None = None) -> dict | list | None:
     """Make an API call to an arr service."""
     cmd = ["curl", "-s", f"{base}{endpoint}", "-H", f"X-Api-Key: {key}"]
+    stdin_data = None
     if method in ("POST", "DELETE"):
         cmd.extend(["-X", method, "-H", "Content-Type: application/json"])
         if data:
-            cmd.extend(["-d", json.dumps(data)])
+            # Pass via stdin to avoid "Argument list too long" on large payloads
+            cmd.extend(["-d", "@-"])
+            stdin_data = json.dumps(data)
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30,
+                                input=stdin_data)
         if result.stdout.strip():
             return json.loads(result.stdout)
     except (subprocess.TimeoutExpired, json.JSONDecodeError):
