@@ -1346,49 +1346,137 @@ if [ -n "${WHISPARR_API_KEY:-}" ]; then
     fi
 fi
 
-# --- BAZARR: Sonarr/Radarr connection + forced subs ---
+# --- BAZARR: Full configuration — arr connections, providers, language profiles ---
 if [ -n "${BAZARR_API_KEY:-}" ]; then
     info "Configuring Bazarr..."
     sleep 5  # Bazarr is slow to init
 
-    # Configure Sonarr connection
+    local BZ="http://localhost:6767"
+    local BZ_AUTH="-H X-API-KEY:${BAZARR_API_KEY}"
+
+    # Wait for Bazarr API
+    local bz_ready=false
+    for _ in $(seq 1 15); do
+        if curl -sf -o /dev/null "${BZ}/api/system/status" ${BZ_AUTH} 2>/dev/null; then
+            bz_ready=true; break
+        fi
+        sleep 2
+    done
+    if [ "$bz_ready" = false ]; then
+        warn "Bazarr API not responding — skipping configuration"
+    else
+
+    # ── Arr connections ──────────────────────────────────────────────────
     if [ -n "${SONARR_API_KEY:-}" ]; then
-        curl -sf -X PATCH "http://localhost:6767/api/system/settings/sonarr" \
+        curl -sf -X PATCH "${BZ}/api/system/settings/sonarr" \
             -H "X-API-KEY: ${BAZARR_API_KEY}" \
             -H "Content-Type: application/json" \
             -d "{
                 \"ip\": \"sonarr\", \"port\": 8989,
                 \"apikey\": \"${SONARR_API_KEY}\",
-                \"only_monitored\": true, \"series_sync\": 60,
-                \"episodes_sync\": 60
+                \"only_monitored\": false, \"series_sync\": 60
             }" > /dev/null 2>&1 && log "  Bazarr → Sonarr connected" || true
     fi
 
-    # Configure Radarr connection
     if [ -n "${RADARR_API_KEY:-}" ]; then
-        curl -sf -X PATCH "http://localhost:6767/api/system/settings/radarr" \
+        curl -sf -X PATCH "${BZ}/api/system/settings/radarr" \
             -H "X-API-KEY: ${BAZARR_API_KEY}" \
             -H "Content-Type: application/json" \
             -d "{
                 \"ip\": \"radarr\", \"port\": 7878,
                 \"apikey\": \"${RADARR_API_KEY}\",
-                \"only_monitored\": true, \"movies_sync\": 60
+                \"only_monitored\": false, \"movies_sync\": 60
             }" > /dev/null 2>&1 && log "  Bazarr → Radarr connected" || true
     fi
 
-    # Configure languages with forced subs
-    curl -sf -X PATCH "http://localhost:6767/api/system/settings/languages" \
+    # ── Enable Sonarr + Radarr in general settings ───────────────────────
+    curl -sf -X PATCH "${BZ}/api/system/settings/general" \
         -H "X-API-KEY: ${BAZARR_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d '{
-            "enabled": true,
-            "languages": [{"name": "English", "code2": "en", "code3": "eng", "enabled": true, "forced": "Both", "hi": "False"}]
-        }' > /dev/null 2>&1 && log "  Bazarr: English + Forced subs = Both" || \
-        warn "  Bazarr: forced subs API may have changed — verify in UI"
+        -d "{
+            \"use_sonarr\": true, \"use_radarr\": true,
+            \"use_embedded_subs\": true, \"adaptive_searching\": true,
+            \"upgrade_subs\": true, \"days_to_upgrade_subs\": 7,
+            \"minimum_score\": 80, \"minimum_score_movie\": 65,
+            \"serie_default_enabled\": true, \"movie_default_enabled\": true,
+            \"wanted_search_frequency\": 6, \"wanted_search_frequency_movie\": 6
+        }" > /dev/null 2>&1 && log "  Bazarr: general settings configured" || true
 
-    log "Bazarr configured"
+    # ── Subtitle providers ───────────────────────────────────────────────
+    # Build provider list — always include credential-free providers
+    local PROVIDERS='["podnapisi","subf2m","animetosho"'
+
+    # SubDL (optional — needs API key)
+    if [ -n "${SUBDL_API_KEY:-}" ]; then
+        PROVIDERS="${PROVIDERS},\"subdl\""
+        curl -sf -X PATCH "${BZ}/api/system/settings/subdl" \
+            -H "X-API-KEY: ${BAZARR_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"api_key\": \"${SUBDL_API_KEY}\"}" > /dev/null 2>&1 && \
+            log "  Bazarr: SubDL provider configured" || true
+    fi
+
+    # OpenSubtitles.com (optional — needs username + password)
+    if [ -n "${OPENSUBTITLES_USERNAME:-}" ] && [ -n "${OPENSUBTITLES_PASSWORD:-}" ]; then
+        PROVIDERS="${PROVIDERS},\"opensubtitlescom\""
+        curl -sf -X PATCH "${BZ}/api/system/settings/opensubtitlescom" \
+            -H "X-API-KEY: ${BAZARR_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{
+                \"username\": \"${OPENSUBTITLES_USERNAME}\",
+                \"password\": \"${OPENSUBTITLES_PASSWORD}\",
+                \"use_hash\": true,
+                \"include_ai_translated\": false,
+                \"include_machine_translated\": false
+            }" > /dev/null 2>&1 && \
+            log "  Bazarr: OpenSubtitles.com provider configured" || true
+    else
+        # Enable without credentials — basic access still works
+        PROVIDERS="${PROVIDERS},\"opensubtitlescom\""
+    fi
+
+    PROVIDERS="${PROVIDERS}]"
+
+    # Subf2m user-agent
+    curl -sf -X PATCH "${BZ}/api/system/settings/subf2m" \
+        -H "X-API-KEY: ${BAZARR_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d '{"user_agent": "Mozilla/5.0", "verify_ssl": true}' > /dev/null 2>&1 || true
+
+    # Set enabled providers
+    curl -sf -X PATCH "${BZ}/api/system/settings/general" \
+        -H "X-API-KEY: ${BAZARR_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\"enabled_providers\": ${PROVIDERS}}" > /dev/null 2>&1 && \
+        log "  Bazarr: providers enabled (${PROVIDERS})" || true
+
+    # ── Enable English language ──────────────────────────────────────────
+    local BZ_DB="$APPDATA/bazarr/config/db/bazarr.db"
+    if [ -f "$BZ_DB" ]; then
+        sqlite3 "$BZ_DB" "UPDATE table_settings_languages SET enabled = 1 WHERE code3 = 'eng';" 2>/dev/null && \
+            log "  Bazarr: English language enabled" || true
+
+        # ── Create language profile: English + Forced ────────────────────
+        local profile_exists
+        profile_exists=$(sqlite3 "$BZ_DB" "SELECT COUNT(*) FROM table_languages_profiles WHERE name = 'English + Forced';" 2>/dev/null || echo "0")
+        if [ "${profile_exists:-0}" -eq 0 ]; then
+            sqlite3 "$BZ_DB" "INSERT INTO table_languages_profiles (\"profileId\", cutoff, \"originalFormat\", items, name, \"mustContain\", \"mustNotContain\") VALUES (1, 65535, 0, '[{\"id\": 1, \"language\": \"en\", \"forced\": false, \"hi\": false, \"audio_exclude\": false}, {\"id\": 2, \"language\": \"en\", \"forced\": true, \"hi\": false, \"audio_exclude\": false}]', 'English + Forced', '[]', '[]');" 2>/dev/null && \
+                log "  Bazarr: 'English + Forced' profile created" || true
+        else
+            log "  Bazarr: 'English + Forced' profile already exists"
+        fi
+
+        # Set as default profile for series and movies
+        sqlite3 "$BZ_DB" "UPDATE system SET value = '1' WHERE key = 'serie_default_profile'; UPDATE system SET value = '1' WHERE key = 'movie_default_profile';" 2>/dev/null || true
+    else
+        warn "  Bazarr DB not found at $BZ_DB — language profile must be set via UI"
+    fi
+
+    log "Bazarr fully configured"
+
+    fi  # bz_ready
 else
-    warn "Bazarr: no API key yet — configure manually after restart"
+    warn "Bazarr: no API key yet — configure manually after first start"
 fi
 
 # --- Notifiarr: write API key to config file (not env var) ---

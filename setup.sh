@@ -393,6 +393,22 @@ collect_arr_questions() {
     ask NZBGEEK_API_KEY "NZBgeek API key" "skip"
     [ "$NZBGEEK_API_KEY" = "skip" ] && NZBGEEK_API_KEY=""
 
+    header "Subtitle Providers (Optional)"
+    echo -e "  ${DIM}Bazarr downloads subtitles automatically. Credential-free providers${NC}"
+    echo -e "  ${DIM}(Podnapisi, Subf2m, Animetosho) are always enabled.${NC}"
+    echo -e "  ${DIM}Add optional provider keys for better coverage.${NC}\n"
+
+    ask SUBDL_API_KEY "SubDL API key (subdl.com, or 'skip')" "skip"
+    [ "$SUBDL_API_KEY" = "skip" ] && SUBDL_API_KEY=""
+
+    ask OPENSUBTITLES_USERNAME "OpenSubtitles.com username (or 'skip')" "skip"
+    if [ "$OPENSUBTITLES_USERNAME" != "skip" ]; then
+        ask OPENSUBTITLES_PASSWORD "OpenSubtitles.com password" "" "secret"
+    else
+        OPENSUBTITLES_USERNAME=""
+        OPENSUBTITLES_PASSWORD=""
+    fi
+
     # API keys — init script populates these automatically
     RADARR_API_KEY="${RADARR_API_KEY:-}"
     SONARR_API_KEY="${SONARR_API_KEY:-}"
@@ -520,6 +536,9 @@ BOOKSHELF_API_KEY=${BOOKSHELF_API_KEY}
 WHISPARR_API_KEY=${WHISPARR_API_KEY}
 SABNZBD_API_KEY=${SABNZBD_API_KEY}
 NZBGEEK_API_KEY=${NZBGEEK_API_KEY}
+SUBDL_API_KEY=${SUBDL_API_KEY:-}
+OPENSUBTITLES_USERNAME=${OPENSUBTITLES_USERNAME:-}
+OPENSUBTITLES_PASSWORD=${OPENSUBTITLES_PASSWORD:-}
 NOTIFIARR_API_KEY=${NOTIFIARR_API_KEY}
 TRAKT_ACCESS_TOKEN=${TRAKT_ACCESS_TOKEN:-}
 PLEX_TOKEN=${PLEX_TOKEN:-}
