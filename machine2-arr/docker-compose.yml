@@ -436,7 +436,15 @@ services:
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
-      - HOMEPAGE_ALLOWED_HOSTS=192.168.1.27:3101,localhost:3000
+      - HOMEPAGE_ALLOWED_HOSTS=${MACHINE_IP:-localhost}:3101,localhost:3000
+      - HOMEPAGE_VAR_HOST=${MACHINE_IP:-localhost}
+      - HOMEPAGE_VAR_SONARR_KEY=${SONARR_API_KEY:-}
+      - HOMEPAGE_VAR_RADARR_KEY=${RADARR_API_KEY:-}
+      - HOMEPAGE_VAR_LIDARR_KEY=${LIDARR_API_KEY:-}
+      - HOMEPAGE_VAR_BAZARR_KEY=${BAZARR_API_KEY:-}
+      - HOMEPAGE_VAR_PROWLARR_KEY=${PROWLARR_API_KEY:-}
+      - HOMEPAGE_VAR_SABNZBD_KEY=${SABNZBD_API_KEY:-}
+      - HOMEPAGE_VAR_QBIT_PASSWORD=${QBIT_PASSWORD:-}
     ports: ["3101:3000"]
     volumes:
       - ${APPDATA}/homepage/config:/app/config

@@ -1,0 +1,82 @@
+---
+- Media:
+    - Sonarr:
+        icon: sonarr.svg
+        href: http://{{HOMEPAGE_VAR_HOST}}:8989
+        widget:
+          type: sonarr
+          url: http://sonarr:8989
+          key: "{{HOMEPAGE_VAR_SONARR_KEY}}"
+    - Radarr:
+        icon: radarr.svg
+        href: http://{{HOMEPAGE_VAR_HOST}}:7878
+        widget:
+          type: radarr
+          url: http://radarr:7878
+          key: "{{HOMEPAGE_VAR_RADARR_KEY}}"
+    - Lidarr:
+        icon: lidarr.svg
+        href: http://{{HOMEPAGE_VAR_HOST}}:8686
+        widget:
+          type: lidarr
+          url: http://lidarr:8686
+          key: "{{HOMEPAGE_VAR_LIDARR_KEY}}"
+    - Bazarr:
+        icon: bazarr.svg
+        href: http://{{HOMEPAGE_VAR_HOST}}:6767
+        widget:
+          type: bazarr
+          url: http://bazarr:6767
+          key: "{{HOMEPAGE_VAR_BAZARR_KEY}}"
+
+- Downloads:
+    - qBittorrent:
+        icon: qbittorrent.svg
+        href: http://{{HOMEPAGE_VAR_HOST}}:8080
+        widget:
+          type: qbittorrent
+          url: http://gluetun:8080
+          username: admin
+          password: "{{HOMEPAGE_VAR_QBIT_PASSWORD}}"
+    - SABnzbd:
+        icon: sabnzbd.svg
+        href: http://{{HOMEPAGE_VAR_HOST}}:8085
+        widget:
+          type: sabnzbd
+          url: http://sabnzbd:8080
+          key: "{{HOMEPAGE_VAR_SABNZBD_KEY}}"
+    - Prowlarr:
+        icon: prowlarr.svg
+        href: http://{{HOMEPAGE_VAR_HOST}}:9696
+        widget:
+          type: prowlarr
+          url: http://prowlarr:9696
+          key: "{{HOMEPAGE_VAR_PROWLARR_KEY}}"
+    - Autobrr:
+        icon: autobrr.svg
+        href: http://{{HOMEPAGE_VAR_HOST}}:7474
+
+- Media Management:
+    - Whisparr:
+        icon: whisparr.svg
+        href: http://{{HOMEPAGE_VAR_HOST}}:6969
+    - Bookshelf:
+        icon: readarr.svg
+        href: http://{{HOMEPAGE_VAR_HOST}}:8787
+    - Audiobookshelf:
+        icon: audiobookshelf.svg
+        href: http://{{HOMEPAGE_VAR_HOST}}:13378
+    - Stash:
+        icon: stash.svg
+        href: http://{{HOMEPAGE_VAR_HOST}}:9999
+
+- System:
+    - Seerr:
+        icon: overseerr.svg
+        href: http://{{HOMEPAGE_VAR_HOST}}:5055
+    - Dozzle:
+        icon: dozzle.svg
+        href: http://{{HOMEPAGE_VAR_HOST}}:9080
+    - Syncthing:
+        icon: syncthing.svg
+        href: http://{{HOMEPAGE_VAR_HOST}}:8384

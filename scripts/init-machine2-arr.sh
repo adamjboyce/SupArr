@@ -1479,6 +1479,113 @@ else
     warn "Bazarr: no API key yet — configure manually after first start"
 fi
 
+# --- AUTOBRR: onboard + download clients ---
+info "Configuring Autobrr..."
+local AUTOBRR_URL="http://localhost:7474"
+
+# Wait for Autobrr API
+local autobrr_ready=false
+for _ in $(seq 1 15); do
+    if curl -sf -o /dev/null "${AUTOBRR_URL}/api/healthz" 2>/dev/null || \
+       curl -sf -o /dev/null "${AUTOBRR_URL}" 2>/dev/null; then
+        autobrr_ready=true; break
+    fi
+    sleep 2
+done
+
+if [ "$autobrr_ready" = true ]; then
+    # Check if onboarding is needed (no users exist)
+    local autobrr_needs_onboard
+    autobrr_needs_onboard=$(curl -s -o /dev/null -w '%{http_code}' "${AUTOBRR_URL}/api/auth/onboard" -X HEAD 2>/dev/null)
+
+    # Create user if onboarding available
+    if curl -s -X POST "${AUTOBRR_URL}/api/auth/onboard" \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"admin\",\"password\":\"${QBIT_PASSWORD:-SupArr2026}\"}" 2>/dev/null | grep -q "successfully"; then
+        log "  Autobrr: admin user created"
+    fi
+
+    # Login and create API key
+    curl -s -X POST "${AUTOBRR_URL}/api/auth/login" \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"admin\",\"password\":\"${QBIT_PASSWORD:-SupArr2026}\"}" \
+        -c /tmp/autobrr_cookies.txt > /dev/null 2>&1
+
+    local AUTOBRR_API_KEY
+    AUTOBRR_API_KEY=$(curl -s -X POST "${AUTOBRR_URL}/api/keys" \
+        -b /tmp/autobrr_cookies.txt \
+        -H "Content-Type: application/json" \
+        -d '{"name":"suparr-init","scopes":[]}' 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin).get("key",""))' 2>/dev/null || echo "")
+    rm -f /tmp/autobrr_cookies.txt
+
+    if [ -n "$AUTOBRR_API_KEY" ]; then
+        log "  Autobrr: API key created"
+        update_env_key "AUTOBRR_API_KEY" "$AUTOBRR_API_KEY" --force
+
+        # Add download clients
+        local autobrr_header="-H X-API-Token:${AUTOBRR_API_KEY}"
+
+        if [ -n "${SONARR_API_KEY:-}" ]; then
+            curl -sf -X POST "${AUTOBRR_URL}/api/download_clients" \
+                -H "X-API-Token: ${AUTOBRR_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "{\"name\":\"Sonarr\",\"type\":\"SONARR\",\"enabled\":true,\"host\":\"http://sonarr:8989\",\"settings\":{\"apikey\":\"${SONARR_API_KEY}\"}}" > /dev/null 2>&1 && \
+                log "  Autobrr → Sonarr connected" || true
+        fi
+
+        if [ -n "${RADARR_API_KEY:-}" ]; then
+            curl -sf -X POST "${AUTOBRR_URL}/api/download_clients" \
+                -H "X-API-Token: ${AUTOBRR_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "{\"name\":\"Radarr\",\"type\":\"RADARR\",\"enabled\":true,\"host\":\"http://radarr:7878\",\"settings\":{\"apikey\":\"${RADARR_API_KEY}\"}}" > /dev/null 2>&1 && \
+                log "  Autobrr → Radarr connected" || true
+        fi
+
+        if [ -n "${LIDARR_API_KEY:-}" ]; then
+            curl -sf -X POST "${AUTOBRR_URL}/api/download_clients" \
+                -H "X-API-Token: ${AUTOBRR_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "{\"name\":\"Lidarr\",\"type\":\"LIDARR\",\"enabled\":true,\"host\":\"http://lidarr:8686\",\"settings\":{\"apikey\":\"${LIDARR_API_KEY}\"}}" > /dev/null 2>&1 && \
+                log "  Autobrr → Lidarr connected" || true
+        fi
+
+        log "Autobrr configured"
+    else
+        warn "  Autobrr: could not create API key"
+    fi
+else
+    warn "Autobrr: API not responding — configure manually at http://localhost:7474"
+fi
+
+# --- HOMEPAGE: seed config from templates ---
+info "Configuring Homepage..."
+local HOMEPAGE_CONFIG="$APPDATA/homepage/config"
+local HOMEPAGE_SEEDS="$(dirname "$0")/../config-seeds/homepage"
+
+if [ -d "$HOMEPAGE_SEEDS" ]; then
+    # Copy seed configs
+    for f in services.yaml settings.yaml docker.yaml widgets.yaml; do
+        if [ -f "$HOMEPAGE_SEEDS/$f" ]; then
+            cp "$HOMEPAGE_SEEDS/$f" "$HOMEPAGE_CONFIG/$f"
+        fi
+    done
+
+    # Homepage uses env vars with HOMEPAGE_VAR_ prefix for substitution
+    # Add the variables to the compose .env so Homepage can read them at runtime
+    update_env_key "HOMEPAGE_VAR_HOST" "${MACHINE_IP:-localhost}" --force
+    update_env_key "HOMEPAGE_VAR_SONARR_KEY" "${SONARR_API_KEY:-}" --force
+    update_env_key "HOMEPAGE_VAR_RADARR_KEY" "${RADARR_API_KEY:-}" --force
+    update_env_key "HOMEPAGE_VAR_LIDARR_KEY" "${LIDARR_API_KEY:-}" --force
+    update_env_key "HOMEPAGE_VAR_BAZARR_KEY" "${BAZARR_API_KEY:-}" --force
+    update_env_key "HOMEPAGE_VAR_PROWLARR_KEY" "${PROWLARR_API_KEY:-}" --force
+    update_env_key "HOMEPAGE_VAR_SABNZBD_KEY" "${SABNZBD_API_KEY:-}" --force
+    update_env_key "HOMEPAGE_VAR_QBIT_PASSWORD" "${QBIT_PASSWORD:-}" --force
+
+    log "Homepage configured with service widgets"
+else
+    warn "Homepage: config seeds not found at $HOMEPAGE_SEEDS — using defaults"
+fi
+
 # --- Notifiarr: write API key to config file (not env var) ---
 # Empty DN_API_KEY env var was overriding config file. Now we write directly to config.
 if [ -n "${NOTIFIARR_API_KEY:-}" ]; then

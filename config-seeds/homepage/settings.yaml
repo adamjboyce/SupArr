@@ -1,0 +1,22 @@
+---
+title: SupArr
+background:
+  image: ""
+  blur: sm
+  opacity: 50
+theme: dark
+color: slate
+headerStyle: clean
+layout:
+  Media:
+    style: row
+    columns: 4
+  Downloads:
+    style: row
+    columns: 3
+  Media Management:
+    style: row
+    columns: 4
+  System:
+    style: row
+    columns: 4

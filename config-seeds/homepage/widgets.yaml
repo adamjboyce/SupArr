@@ -1,0 +1,12 @@
+---
+- resources:
+    cpu: true
+    memory: true
+    disk: /
+    label: System
+- datetime:
+    text_size: xl
+    format:
+      dateStyle: short
+      timeStyle: short
+      hour12: true
