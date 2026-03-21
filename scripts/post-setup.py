@@ -313,41 +313,23 @@ def setup_seerr_playwright():
         warn("  Complete setup manually at http://localhost:5055")
 
 
-def setup_tdarr_playwright():
-    """Configure Tdarr libraries and plugins via Playwright."""
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        warn("Tdarr: Playwright not available — configure at :8265")
+def setup_tdarr():
+    """Configure Tdarr via setup-tdarr.sh (hardware-detected flow + libraries)."""
+    script = os.path.join(os.path.dirname(__file__), "setup-tdarr.sh")
+    if not os.path.exists(script):
+        warn("Tdarr: setup-tdarr.sh not found")
         return
 
-    tdarr_url = env("TDARR_URL", "http://localhost:8265")
-    if not wait_for(tdarr_url, timeout=15):
-        warn("Tdarr: not reachable — configure manually")
-        return
-
-    info("Tdarr: attempting library + plugin setup via Playwright...")
-
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto(tdarr_url)
-            page.wait_for_load_state("networkidle", timeout=15000)
-
-            # Tdarr's UI is React-based and complex
-            # The most reliable approach is to use the internal API
-            # which the UI calls behind the scenes
-            warn("Tdarr: automated plugin setup not yet implemented")
-            warn("  Configure manually: Libraries → Plugins in order:")
-            warn("    1. Migz5ConvertContainer → MKV")
-            warn("    2. Migz1FFMPEG → H.265/QSV")
-            warn("    3. Migz3CleanAudio → keep English + original")
-            warn("    4. Migz4CleanSubs → keep English + FORCED")
-
-            browser.close()
-    except Exception as e:
-        warn(f"Tdarr: Playwright failed — {e}")
+    result = subprocess.run(
+        ["bash", script],
+        capture_output=True, text=True, timeout=120,
+    )
+    # Print output (setup-tdarr.sh has its own logging)
+    if result.stdout:
+        for line in result.stdout.strip().split("\n"):
+            print(f"  {line}")
+    if result.returncode != 0 and result.stderr:
+        warn(f"Tdarr: setup script returned {result.returncode}")
 
 
 # ================================================================
@@ -370,11 +352,10 @@ def main():
         ("sabnzbd", setup_sabnzbd),
     ]
 
+    services.append(("tdarr", setup_tdarr))
+
     if not skip_playwright:
-        services.extend([
-            ("seerr", setup_seerr_playwright),
-            ("tdarr", setup_tdarr_playwright),
-        ])
+        services.append(("seerr", setup_seerr_playwright))
 
     for name, fn in services:
         if service_filter and name != service_filter:
@@ -383,6 +364,8 @@ def main():
             fn()
         except Exception as e:
             warn(f"{name}: unexpected error — {e}")
+            warn(f"  This may indicate the service's API has changed.")
+            warn(f"  Check the service UI and configure manually if needed.")
 
     print()
 

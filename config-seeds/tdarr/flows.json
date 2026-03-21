@@ -1,0 +1,259 @@
+[
+  {
+    "_id": "suparr_qsv_hevc",
+    "name": "SupArr QSV HEVC Pipeline",
+    "description": "Migz cleanup + Boosh QSV HEVC transcode with file replacement",
+    "flowPlugins": [
+      {
+        "name": "Input File",
+        "sourceRepo": "Community",
+        "pluginName": "inputFile",
+        "version": "1.0.0",
+        "id": "sa_input",
+        "position": {
+          "x": 500,
+          "y": 50
+        }
+      },
+      {
+        "name": "Migz1 Remux to MKV",
+        "sourceRepo": "Community",
+        "pluginName": "runClassicTranscodePlugin",
+        "version": "2.0.0",
+        "id": "sa_migz1",
+        "inputsDB": {
+          "pluginSourceId": "Community:Tdarr_Plugin_MC93_Migz1Remux",
+          "container": "mkv",
+          "force_conform": "false"
+        },
+        "position": {
+          "x": 500,
+          "y": 150
+        }
+      },
+      {
+        "name": "Migz2 Clean Titles",
+        "sourceRepo": "Community",
+        "pluginName": "runClassicTranscodePlugin",
+        "version": "2.0.0",
+        "id": "sa_migz2",
+        "inputsDB": {
+          "pluginSourceId": "Community:Tdarr_Plugin_MC93_Migz2CleanTitle",
+          "clean_audio": "true",
+          "clean_subtitles": "true"
+        },
+        "position": {
+          "x": 500,
+          "y": 250
+        }
+      },
+      {
+        "name": "Migz3 Clean Audio",
+        "sourceRepo": "Community",
+        "pluginName": "runClassicTranscodePlugin",
+        "version": "2.0.0",
+        "id": "sa_migz3",
+        "inputsDB": {
+          "pluginSourceId": "Community:Tdarr_Plugin_MC93_Migz3CleanAudio",
+          "language": "eng,und",
+          "commentary": "true",
+          "tag_language": "eng",
+          "tag_title": "true"
+        },
+        "position": {
+          "x": 500,
+          "y": 350
+        }
+      },
+      {
+        "name": "Migz4 Clean Subs",
+        "sourceRepo": "Community",
+        "pluginName": "runClassicTranscodePlugin",
+        "version": "2.0.0",
+        "id": "sa_migz4",
+        "inputsDB": {
+          "pluginSourceId": "Community:Tdarr_Plugin_MC93_Migz4CleanSubs",
+          "language": "eng,und",
+          "commentary": "true",
+          "tag_language": "eng"
+        },
+        "position": {
+          "x": 500,
+          "y": 450
+        }
+      },
+      {
+        "name": "Migz5 Convert Audio",
+        "sourceRepo": "Community",
+        "pluginName": "runClassicTranscodePlugin",
+        "version": "2.0.0",
+        "id": "sa_migz5",
+        "inputsDB": {
+          "pluginSourceId": "Community:Tdarr_Plugin_MC93_Migz5ConvertAudio",
+          "aac_stereo": "true",
+          "downmix": "true"
+        },
+        "position": {
+          "x": 500,
+          "y": 550
+        }
+      },
+      {
+        "name": "Boosh QSV HEVC Transcode",
+        "sourceRepo": "Community",
+        "pluginName": "runClassicTranscodePlugin",
+        "version": "2.0.0",
+        "id": "sa_boosh",
+        "inputsDB": {
+          "pluginSourceId": "Community:Tdarr_Plugin_bsh1_Boosh_FFMPEG_QSV_HEVC",
+          "container": "mkv",
+          "encoder": "hevc_qsv",
+          "target_bitrate_modifier": "0.5",
+          "encoder_speedpreset": "slow",
+          "enable_10bit": "false",
+          "reconvert_hevc": "true",
+          "hevc_max_bitrate": "30000",
+          "bitrate_cutoff": "4000",
+          "max_average_bitrate": "20000",
+          "min_average_bitrate": "4000"
+        },
+        "position": {
+          "x": 500,
+          "y": 650
+        }
+      },
+      {
+        "name": "Migz6 Order Streams",
+        "sourceRepo": "Community",
+        "pluginName": "runClassicTranscodePlugin",
+        "version": "2.0.0",
+        "id": "sa_migz6",
+        "inputsDB": {
+          "pluginSourceId": "Community:Tdarr_Plugin_MC93_Migz6OrderStreams"
+        },
+        "position": {
+          "x": 500,
+          "y": 750
+        }
+      },
+      {
+        "name": "Replace Original File",
+        "sourceRepo": "Community",
+        "pluginName": "replaceOriginalFile",
+        "version": "1.0.0",
+        "id": "sa_replace",
+        "position": {
+          "x": 500,
+          "y": 850
+        }
+      }
+    ],
+    "flowEdges": [
+      {
+        "source": "sa_input",
+        "sourceHandle": "1",
+        "target": "sa_migz1",
+        "targetHandle": null,
+        "id": "e_in_m1"
+      },
+      {
+        "source": "sa_migz1",
+        "sourceHandle": "1",
+        "target": "sa_migz2",
+        "targetHandle": null,
+        "id": "e_m1_m2_1"
+      },
+      {
+        "source": "sa_migz1",
+        "sourceHandle": "2",
+        "target": "sa_migz2",
+        "targetHandle": null,
+        "id": "e_m1_m2_2"
+      },
+      {
+        "source": "sa_migz2",
+        "sourceHandle": "1",
+        "target": "sa_migz3",
+        "targetHandle": null,
+        "id": "e_m2_m3_1"
+      },
+      {
+        "source": "sa_migz2",
+        "sourceHandle": "2",
+        "target": "sa_migz3",
+        "targetHandle": null,
+        "id": "e_m2_m3_2"
+      },
+      {
+        "source": "sa_migz3",
+        "sourceHandle": "1",
+        "target": "sa_migz4",
+        "targetHandle": null,
+        "id": "e_m3_m4_1"
+      },
+      {
+        "source": "sa_migz3",
+        "sourceHandle": "2",
+        "target": "sa_migz4",
+        "targetHandle": null,
+        "id": "e_m3_m4_2"
+      },
+      {
+        "source": "sa_migz4",
+        "sourceHandle": "1",
+        "target": "sa_migz5",
+        "targetHandle": null,
+        "id": "e_m4_m5_1"
+      },
+      {
+        "source": "sa_migz4",
+        "sourceHandle": "2",
+        "target": "sa_migz5",
+        "targetHandle": null,
+        "id": "e_m4_m5_2"
+      },
+      {
+        "source": "sa_migz5",
+        "sourceHandle": "1",
+        "target": "sa_boosh",
+        "targetHandle": null,
+        "id": "e_m5_bo_1"
+      },
+      {
+        "source": "sa_migz5",
+        "sourceHandle": "2",
+        "target": "sa_boosh",
+        "targetHandle": null,
+        "id": "e_m5_bo_2"
+      },
+      {
+        "source": "sa_boosh",
+        "sourceHandle": "1",
+        "target": "sa_migz6",
+        "targetHandle": null,
+        "id": "e_bo_m6_1"
+      },
+      {
+        "source": "sa_boosh",
+        "sourceHandle": "2",
+        "target": "sa_migz6",
+        "targetHandle": null,
+        "id": "e_bo_m6_2"
+      },
+      {
+        "source": "sa_migz6",
+        "sourceHandle": "1",
+        "target": "sa_replace",
+        "targetHandle": null,
+        "id": "e_m6_rp_1"
+      },
+      {
+        "source": "sa_migz6",
+        "sourceHandle": "2",
+        "target": "sa_replace",
+        "targetHandle": null,
+        "id": "e_m6_rp_2"
+      }
+    ]
+  }
+]
