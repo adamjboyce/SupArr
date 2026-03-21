@@ -1,7 +1,7 @@
 # =============================================================================
 # Machine 2: Privateer — *arr Stack
 # =============================================================================
-# Download traffic through NordVPN/Gluetun. Everything else unmasked.
+# Download traffic through VPN/Gluetun. Everything else unmasked.
 # Init script: ../scripts/init-machine2-arr.sh
 # =============================================================================
 
@@ -35,15 +35,19 @@ services:
     cap_add: [NET_ADMIN]
     devices: [/dev/net/tun:/dev/net/tun]
     environment:
-      - VPN_SERVICE_PROVIDER=nordvpn
-      - VPN_TYPE=${NORD_VPN_TYPE:-openvpn}
-      - OPENVPN_USER=${NORD_USER}
-      - OPENVPN_PASSWORD=${NORD_PASS}
-      - SERVER_COUNTRIES=${NORD_COUNTRY:-United States}
-      - SERVER_CITIES=${NORD_CITY:-}
-      - SERVER_HOSTNAMES=${NORD_SERVER:-}
-      - WIREGUARD_PRIVATE_KEY=${NORD_WIREGUARD_KEY:-}
+      - VPN_SERVICE_PROVIDER=${VPN_PROVIDER:-nordvpn}
+      - VPN_TYPE=${VPN_TYPE:-openvpn}
+      - OPENVPN_USER=${VPN_USER:-}
+      - OPENVPN_PASSWORD=${VPN_PASS:-}
+      - SERVER_COUNTRIES=${VPN_SERVER_COUNTRIES:-}
+      - SERVER_CITIES=${VPN_SERVER_CITIES:-}
+      - SERVER_REGIONS=${VPN_SERVER_REGION:-}
+      - WIREGUARD_PRIVATE_KEY=${VPN_WIREGUARD_KEY:-}
+      - WIREGUARD_ADDRESSES=${VPN_WIREGUARD_ADDRESSES:-}
       - WIREGUARD_PERSISTENT_KEEPALIVE_INTERVAL=25s
+      - VPN_ENDPOINT_IP=${VPN_ENDPOINT_IP:-}
+      - VPN_ENDPOINT_PORT=${VPN_ENDPOINT_PORT:-}
+      - OPENVPN_CUSTOM_CONFIG=${VPN_CUSTOM_CONFIG:+/gluetun/custom.ovpn}
       - FIREWALL_OUTBOUND_SUBNETS=${LOCAL_SUBNET:-192.168.1.0/24}
       - FIREWALL_VPN_INPUT_PORTS=6881
       - DNS_SERVER=off

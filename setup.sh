@@ -301,38 +301,166 @@ collect_plex_questions() {
 }
 
 collect_arr_questions() {
-    header "Privateer — NordVPN Configuration"
-    echo -e "  ${DIM}All download traffic routes through this VPN tunnel.${NC}"
+    header "VPN Configuration"
+    echo -e "  ${DIM}All download traffic routes through a VPN tunnel via Gluetun.${NC}"
     echo -e "  ${DIM}Kill switch is automatic — if VPN drops, downloads stop. No leaks.${NC}\n"
 
-    echo -e "  ${BOLD}VPN type?${NC}"
-    echo -e "    ${BOLD}1)${NC} OpenVPN (easier — use Nord service credentials)"
-    echo -e "    ${BOLD}2)${NC} WireGuard/NordLynx (faster — needs private key)"
+    echo -e "  ${BOLD}VPN Provider?${NC}"
+    echo -e "    ${BOLD}1)${NC} NordVPN"
+    echo -e "    ${BOLD}2)${NC} Surfshark"
+    echo -e "    ${BOLD}3)${NC} Private Internet Access (PIA)"
+    echo -e "    ${BOLD}4)${NC} Mullvad"
+    echo -e "    ${BOLD}5)${NC} ProtonVPN"
+    echo -e "    ${BOLD}6)${NC} Windscribe"
+    echo -e "    ${BOLD}7)${NC} Custom OpenVPN/WireGuard config file"
     echo ""
-    echo -en "${CYAN}  Choose [1/2] [1]: ${NC}"
-    read -r vpn_choice
-    vpn_choice="${vpn_choice:-1}"
+    echo -en "${CYAN}  Choose [1-7] [1]: ${NC}"
+    read -r vpn_provider_choice
+    vpn_provider_choice="${vpn_provider_choice:-1}"
 
-    if [ "$vpn_choice" = "2" ]; then
-        NORD_VPN_TYPE="wireguard"
-        ask NORD_WIREGUARD_KEY "NordLynx private key" "" "secret"
-        NORD_USER="${NORD_USER:-}"
-        NORD_PASS="${NORD_PASS:-}"
+    # Map choice to Gluetun provider name
+    case "$vpn_provider_choice" in
+        1) VPN_PROVIDER="nordvpn" ;;
+        2) VPN_PROVIDER="surfshark" ;;
+        3) VPN_PROVIDER="private internet access" ;;
+        4) VPN_PROVIDER="mullvad" ;;
+        5) VPN_PROVIDER="protonvpn" ;;
+        6) VPN_PROVIDER="windscribe" ;;
+        7) VPN_PROVIDER="custom" ;;
+        *) err "Invalid choice. Run again."; exit 1 ;;
+    esac
+
+    # VPN type — OpenVPN vs WireGuard
+    if [ "$VPN_PROVIDER" = "custom" ]; then
+        echo -e "\n  ${BOLD}Custom VPN type?${NC}"
+        echo -e "    ${BOLD}1)${NC} OpenVPN (.ovpn config file)"
+        echo -e "    ${BOLD}2)${NC} WireGuard"
+        echo ""
+        echo -en "${CYAN}  Choose [1/2] [1]: ${NC}"
+        read -r vpn_type_choice
+        VPN_TYPE="${vpn_type_choice:-1}"
+        [ "$VPN_TYPE" = "2" ] && VPN_TYPE="wireguard" || VPN_TYPE="openvpn"
+    elif [ "$VPN_PROVIDER" = "mullvad" ]; then
+        # Mullvad works best with WireGuard
+        echo -e "\n  ${DIM}Mullvad recommends WireGuard for best performance.${NC}"
+        echo -e "  ${BOLD}VPN type?${NC}"
+        echo -e "    ${BOLD}1)${NC} WireGuard (recommended)"
+        echo -e "    ${BOLD}2)${NC} OpenVPN"
+        echo ""
+        echo -en "${CYAN}  Choose [1/2] [1]: ${NC}"
+        read -r vpn_type_choice
+        [ "${vpn_type_choice:-1}" = "2" ] && VPN_TYPE="openvpn" || VPN_TYPE="wireguard"
     else
-        NORD_VPN_TYPE="openvpn"
-        echo -e "\n  ${BOLD}⚠ These are NOT your NordVPN login email/password!${NC}"
-        echo -e "  ${DIM}NordVPN uses separate 'service credentials' for OpenVPN:${NC}"
-        echo -e "  ${DIM}  1. Log in at https://my.nordaccount.com${NC}"
-        echo -e "  ${DIM}  2. Go to: NordVPN → Manual Setup → OpenVPN/IKEv2${NC}"
-        echo -e "  ${DIM}  3. Copy the service username and password shown there${NC}"
-        echo -e "  ${DIM}  Direct link: https://my.nordaccount.com/dashboard/nordvpn/manual-configuration/service-credentials/${NC}\n"
-        ask NORD_USER "Nord service username" ""
-        ask NORD_PASS "Nord service password" "" "secret"
-        NORD_WIREGUARD_KEY="${NORD_WIREGUARD_KEY:-}"
+        echo -e "\n  ${BOLD}VPN type?${NC}"
+        echo -e "    ${BOLD}1)${NC} OpenVPN (easier setup)"
+        echo -e "    ${BOLD}2)${NC} WireGuard (faster, lower overhead)"
+        echo ""
+        echo -en "${CYAN}  Choose [1/2] [1]: ${NC}"
+        read -r vpn_type_choice
+        [ "${vpn_type_choice:-1}" = "2" ] && VPN_TYPE="wireguard" || VPN_TYPE="openvpn"
     fi
 
-    ask NORD_COUNTRY "VPN server country" "United States"
-    ask NORD_CITY "VPN server city (blank for auto)" ""
+    # Provider-specific credentials
+    VPN_USER="" ; VPN_PASS="" ; VPN_WIREGUARD_KEY="" ; VPN_WIREGUARD_ADDRESSES=""
+    VPN_CUSTOM_CONFIG="" ; VPN_ENDPOINT_IP="" ; VPN_ENDPOINT_PORT=""
+
+    case "$VPN_PROVIDER" in
+        nordvpn)
+            if [ "$VPN_TYPE" = "wireguard" ]; then
+                echo -e "\n  ${DIM}NordLynx private key — find it at:${NC}"
+                echo -e "  ${DIM}https://my.nordaccount.com/dashboard/nordvpn/manual-configuration/${NC}\n"
+                ask VPN_WIREGUARD_KEY "NordLynx private key" "" "secret"
+            else
+                echo -e "\n  ${BOLD}⚠ These are NOT your NordVPN login email/password!${NC}"
+                echo -e "  ${DIM}NordVPN uses separate 'service credentials' for OpenVPN:${NC}"
+                echo -e "  ${DIM}  1. Log in at https://my.nordaccount.com${NC}"
+                echo -e "  ${DIM}  2. Go to: NordVPN → Manual Setup → OpenVPN/IKEv2${NC}"
+                echo -e "  ${DIM}  3. Copy the service username and password shown there${NC}"
+                echo -e "  ${DIM}  Direct link: https://my.nordaccount.com/dashboard/nordvpn/manual-configuration/service-credentials/${NC}\n"
+                ask VPN_USER "Nord service username" ""
+                ask VPN_PASS "Nord service password" "" "secret"
+            fi
+            ;;
+        surfshark)
+            if [ "$VPN_TYPE" = "wireguard" ]; then
+                echo -e "\n  ${DIM}Surfshark WireGuard private key — generate at:${NC}"
+                echo -e "  ${DIM}https://my.surfshark.com/vpn/manual-setup/router/wireguard${NC}\n"
+                ask VPN_WIREGUARD_KEY "WireGuard private key" "" "secret"
+            else
+                echo -e "\n  ${DIM}Surfshark service credentials — NOT your login email/password:${NC}"
+                echo -e "  ${DIM}https://my.surfshark.com/vpn/manual-setup/main${NC}\n"
+                ask VPN_USER "Surfshark service username" ""
+                ask VPN_PASS "Surfshark service password" "" "secret"
+            fi
+            ;;
+        "private internet access")
+            echo -e "\n  ${DIM}PIA uses your regular account username and password.${NC}\n"
+            ask VPN_USER "PIA username" ""
+            ask VPN_PASS "PIA password" "" "secret"
+            ;;
+        mullvad)
+            if [ "$VPN_TYPE" = "wireguard" ]; then
+                echo -e "\n  ${DIM}Generate a WireGuard key at: https://mullvad.net/en/account/wireguard-config${NC}"
+                echo -e "  ${DIM}You'll need the private key AND the assigned address.${NC}\n"
+                ask VPN_WIREGUARD_KEY "WireGuard private key" "" "secret"
+                ask VPN_WIREGUARD_ADDRESSES "WireGuard address (e.g. 10.64.0.1/32)" ""
+            else
+                echo -e "\n  ${DIM}Mullvad account number (16 digits, no spaces).${NC}\n"
+                ask VPN_USER "Mullvad account number" ""
+            fi
+            ;;
+        protonvpn)
+            echo -e "\n  ${DIM}ProtonVPN OpenVPN/IKEv2 credentials — NOT your Proton login:${NC}"
+            echo -e "  ${DIM}https://account.protonvpn.com/account#openvpn${NC}"
+            echo -e "  ${DIM}For port forwarding, append +pmp to your username.${NC}\n"
+            ask VPN_USER "ProtonVPN OpenVPN username" ""
+            ask VPN_PASS "ProtonVPN OpenVPN password" "" "secret"
+            ;;
+        windscribe)
+            if [ "$VPN_TYPE" = "wireguard" ]; then
+                echo -e "\n  ${DIM}Windscribe WireGuard config — generate at:${NC}"
+                echo -e "  ${DIM}https://windscribe.com/getconfig/wireguard${NC}\n"
+                ask VPN_WIREGUARD_KEY "WireGuard private key" "" "secret"
+            else
+                echo -e "\n  ${DIM}Windscribe uses your regular account credentials.${NC}\n"
+                ask VPN_USER "Windscribe username" ""
+                ask VPN_PASS "Windscribe password" "" "secret"
+            fi
+            ;;
+        custom)
+            if [ "$VPN_TYPE" = "openvpn" ]; then
+                echo -e "\n  ${DIM}Place your .ovpn config file in the gluetun config directory.${NC}"
+                echo -e "  ${DIM}It will be mounted at /gluetun/custom.ovpn inside the container.${NC}\n"
+                ask VPN_CUSTOM_CONFIG "Path to .ovpn file" ""
+                ask VPN_USER "OpenVPN username (if required, or blank)" ""
+                ask VPN_PASS "OpenVPN password (if required, or blank)" "" "secret"
+            else
+                echo -e "\n  ${DIM}WireGuard manual configuration.${NC}\n"
+                ask VPN_WIREGUARD_KEY "WireGuard private key" "" "secret"
+                ask VPN_WIREGUARD_ADDRESSES "WireGuard address (e.g. 10.0.0.2/32)" ""
+                ask VPN_ENDPOINT_IP "Server endpoint IP" ""
+                ask VPN_ENDPOINT_PORT "Server endpoint port" "51820"
+            fi
+            ;;
+    esac
+
+    # Server location (not needed for custom)
+    if [ "$VPN_PROVIDER" != "custom" ]; then
+        if [ "$VPN_PROVIDER" = "private internet access" ]; then
+            ask VPN_SERVER_REGION "VPN server region" "US East"
+        else
+            ask VPN_SERVER_COUNTRIES "VPN server country" "United States"
+            ask VPN_SERVER_CITIES "VPN server city (blank for auto)" ""
+        fi
+    fi
+
+    # Backward compat — map to NORD_ vars for existing compose references
+    NORD_VPN_TYPE="$VPN_TYPE"
+    NORD_USER="$VPN_USER"
+    NORD_PASS="$VPN_PASS"
+    NORD_WIREGUARD_KEY="$VPN_WIREGUARD_KEY"
+    NORD_COUNTRY="${VPN_SERVER_COUNTRIES:-}"
+    NORD_CITY="${VPN_SERVER_CITIES:-}"
 
     header "qBittorrent"
     echo -e "  ${DIM}Setting a custom password now so you don't have to change it later.${NC}\n"
@@ -518,12 +646,18 @@ NAS_IP=${NAS_IP}
 NAS_MEDIA_EXPORT=${NAS_MEDIA_EXPORT:-}
 NAS_DOWNLOADS_EXPORT=${NAS_DOWNLOADS_EXPORT:-}
 NAS_BACKUPS_EXPORT=${NAS_BACKUPS_EXPORT:-}
-NORD_VPN_TYPE=${NORD_VPN_TYPE}
-NORD_USER=${NORD_USER:-}
-NORD_PASS=${NORD_PASS:-}
-NORD_WIREGUARD_KEY=${NORD_WIREGUARD_KEY:-}
-NORD_COUNTRY=${NORD_COUNTRY}
-NORD_CITY=${NORD_CITY}
+VPN_PROVIDER=${VPN_PROVIDER:-nordvpn}
+VPN_TYPE=${VPN_TYPE:-openvpn}
+VPN_USER=${VPN_USER:-}
+VPN_PASS=${VPN_PASS:-}
+VPN_WIREGUARD_KEY=${VPN_WIREGUARD_KEY:-}
+VPN_WIREGUARD_ADDRESSES=${VPN_WIREGUARD_ADDRESSES:-}
+VPN_SERVER_COUNTRIES=${VPN_SERVER_COUNTRIES:-}
+VPN_SERVER_CITIES=${VPN_SERVER_CITIES:-}
+VPN_SERVER_REGION=${VPN_SERVER_REGION:-}
+VPN_CUSTOM_CONFIG=${VPN_CUSTOM_CONFIG:-}
+VPN_ENDPOINT_IP=${VPN_ENDPOINT_IP:-}
+VPN_ENDPOINT_PORT=${VPN_ENDPOINT_PORT:-}
 LOCAL_SUBNET=${LOCAL_SUBNET}
 TAILSCALE_AUTH_KEY=${TAILSCALE_AUTH_KEY}
 QBIT_PASSWORD=${QBIT_PASSWORD:-SupArr2026!}
@@ -595,10 +729,10 @@ if ! ask_yn "Deploy now?" "y"; then
     exit 0
 fi
 
-# ── Overseerr readiness check (quiet — no output) ─────────────────────────────
-check_overseerr_ready() {
+# ── Seerr readiness check (quiet — no output) ─────────────────────────────
+check_seerr_ready() {
     local plex_appdata="$1"
-    local settings="$plex_appdata/overseerr/config/settings.json"
+    local settings="$plex_appdata/seerr/config/settings.json"
     [ -f "$settings" ] || return 1
     local os_key
     os_key=$(jq -r '.main.apiKey // empty' "$settings" 2>/dev/null || echo "")
@@ -642,28 +776,28 @@ trigger_kometa_first_run() {
     return 0
 }
 
-# ── Overseerr auto-config helper ─────────────────────────────────────────────
-configure_overseerr() {
+# ── Seerr auto-config helper ─────────────────────────────────────────────
+configure_seerr() {
     local arr_host="$1" radarr_key="$2" sonarr_key="$3" plex_appdata="$4"
 
     if [ -z "$radarr_key" ] && [ -z "$sonarr_key" ]; then
-        warn "Overseerr: no *arr API keys available — skipping"
+        warn "Seerr: no *arr API keys available — skipping"
         return 1
     fi
 
-    info "Configuring Overseerr → Radarr/Sonarr..."
+    info "Configuring Seerr → Radarr/Sonarr..."
 
-    # Read Overseerr API key from settings.json
-    local settings="$plex_appdata/overseerr/config/settings.json"
+    # Read Seerr API key from settings.json
+    local settings="$plex_appdata/seerr/config/settings.json"
     if [ ! -f "$settings" ]; then
-        warn "Overseerr not initialized — complete the setup wizard at http://localhost:5055 first, then re-run"
+        warn "Seerr not initialized — complete the setup wizard at http://localhost:5055 first, then re-run"
         return
     fi
 
     local os_key
     os_key=$(jq -r '.main.apiKey // empty' "$settings" 2>/dev/null || echo "")
     if [ -z "$os_key" ]; then
-        warn "Overseerr API key not found — complete the setup wizard first"
+        warn "Seerr API key not found — complete the setup wizard first"
         return 1
     fi
 
@@ -678,7 +812,7 @@ configure_overseerr() {
         sleep 2
     done
     if [ "$ready" = false ]; then
-        warn "Overseerr API not responding"
+        warn "Seerr API not responding"
         return 1
     fi
 
@@ -686,7 +820,7 @@ configure_overseerr() {
     local initialized
     initialized=$(curl -sf "${os_url}/settings/public" 2>/dev/null | jq -r '.initialized // false' 2>/dev/null || echo "false")
     if [ "$initialized" != "true" ]; then
-        warn "Overseerr not initialized — complete setup wizard first, then re-run"
+        warn "Seerr not initialized — complete setup wizard first, then re-run"
         return 1
     fi
 
@@ -727,10 +861,10 @@ configure_overseerr() {
                     \"syncEnabled\": false,
                     \"preventSearch\": false
                 }" > /dev/null 2>&1 && \
-                log "  Overseerr → Radarr (${arr_host}:7878)" || \
-                warn "  Overseerr → Radarr failed"
+                log "  Seerr → Radarr (${arr_host}:7878)" || \
+                warn "  Seerr → Radarr failed"
         else
-            log "  Overseerr → Radarr already configured"
+            log "  Seerr → Radarr already configured"
         fi
     fi
 
@@ -775,10 +909,10 @@ configure_overseerr() {
                     \"syncEnabled\": false,
                     \"preventSearch\": false
                 }" > /dev/null 2>&1 && \
-                log "  Overseerr → Sonarr (${arr_host}:8989)" || \
-                warn "  Overseerr → Sonarr failed"
+                log "  Seerr → Sonarr (${arr_host}:8989)" || \
+                warn "  Seerr → Sonarr failed"
         else
-            log "  Overseerr → Sonarr already configured"
+            log "  Seerr → Sonarr already configured"
         fi
     fi
 
@@ -787,7 +921,7 @@ configure_overseerr() {
         -H "X-Api-Key: ${os_key}" \
         -H "Content-Type: application/json" \
         -d '{"watchlistSync": true}' > /dev/null 2>&1 && \
-        log "  Overseerr: Plex Watchlist sync enabled" || true
+        log "  Seerr: Plex Watchlist sync enabled" || true
 }
 
 # ── Run Init Script(s) ──────────────────────────────────────────────────────
@@ -806,14 +940,14 @@ if [ "$ROLE" = "both" ]; then
     set +H 2>/dev/null || true
     set -a; source "$ARR_PROJECT_DIR/.env"; set +a
 
-    # Detect machine IP for cross-stack Overseerr → *arr connection
+    # Detect machine IP for cross-stack Seerr → *arr connection
     MACHINE_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
     [ -z "${MACHINE_IP:-}" ] && MACHINE_IP="localhost"
 
-    OVERSEERR_CONFIGURED=false
-    header "Overseerr → Radarr/Sonarr"
-    configure_overseerr "$MACHINE_IP" "${RADARR_API_KEY:-}" "${SONARR_API_KEY:-}" "$PLEX_APPDATA" && \
-        OVERSEERR_CONFIGURED=true
+    SEERR_CONFIGURED=false
+    header "Seerr → Radarr/Sonarr"
+    configure_seerr "$MACHINE_IP" "${RADARR_API_KEY:-}" "${SONARR_API_KEY:-}" "$PLEX_APPDATA" && \
+        SEERR_CONFIGURED=true
 
     # Try Kometa first run if Plex already has libraries
     KOMETA_TRIGGERED=false
@@ -854,8 +988,8 @@ if [ "$ROLE" = "plex" ] || [ "$ROLE" = "both" ]; then
     echo -e "    ${DIM}  3. Migz3CleanAudio → keep English + original${NC}"
     echo -e "    ${DIM}  4. Migz4CleanSubs → keep English + ${BOLD}FORCED${NC}${DIM} ⚠️${NC}"
     echo ""
-    echo -e "    ${BOLD}Overseerr${NC}  →  http://localhost:5055"
-    if [ "$ROLE" = "both" ] && [ "${OVERSEERR_CONFIGURED:-false}" = true ]; then
+    echo -e "    ${BOLD}Seerr${NC}  →  http://localhost:5055"
+    if [ "$ROLE" = "both" ] && [ "${SEERR_CONFIGURED:-false}" = true ]; then
         echo -e "    ${DIM}Sign in with Plex (Radarr + Sonarr auto-configured)${NC}"
     elif [ "$ROLE" = "both" ]; then
         echo -e "    ${DIM}Sign in with Plex, then connect Radarr + Sonarr at localhost${NC}"
@@ -940,12 +1074,12 @@ echo -e "  ${DIM}This script is re-run safe. Run it again any time to${NC}"
 echo -e "  ${DIM}update config or finish setup after adding credentials.${NC}"
 echo ""
 
-# ── Post-deploy polling (Overseerr + Kometa) ──────────────────────────────────
-NEED_OVERSEERR_POLL=false
+# ── Post-deploy polling (Seerr + Kometa) ──────────────────────────────────
+NEED_SEERR_POLL=false
 NEED_KOMETA_POLL=false
 
-if [ "$ROLE" = "both" ] && [ "${OVERSEERR_CONFIGURED:-false}" != true ]; then
-    NEED_OVERSEERR_POLL=true
+if [ "$ROLE" = "both" ] && [ "${SEERR_CONFIGURED:-false}" != true ]; then
+    NEED_SEERR_POLL=true
 fi
 
 POLL_PLEX_APPDATA=""
@@ -959,11 +1093,11 @@ if [ -n "$POLL_PLEX_APPDATA" ] && [ "${KOMETA_TRIGGERED:-false}" != true ]; then
     NEED_KOMETA_POLL=true
 fi
 
-if [ "$NEED_OVERSEERR_POLL" = true ] || [ "$NEED_KOMETA_POLL" = true ]; then
+if [ "$NEED_SEERR_POLL" = true ] || [ "$NEED_KOMETA_POLL" = true ]; then
     header "Waiting for Manual Steps"
 
-    if [ "$NEED_OVERSEERR_POLL" = true ]; then
-        echo -e "  ${BOLD}Overseerr:${NC}"
+    if [ "$NEED_SEERR_POLL" = true ]; then
+        echo -e "  ${BOLD}Seerr:${NC}"
         echo -e "    1. Open ${BOLD}http://localhost:5055${NC}"
         echo -e "    2. Sign in with your Plex account"
         echo -e "    3. Complete the setup wizard"
@@ -991,13 +1125,13 @@ if [ "$NEED_OVERSEERR_POLL" = true ] || [ "$NEED_KOMETA_POLL" = true ]; then
         POLL_ELAPSED=$((POLL_ELAPSED + POLL_INTERVAL))
         POLL_MINS=$((POLL_ELAPSED / 60))
 
-        # Check Overseerr
-        if [ "$NEED_OVERSEERR_POLL" = true ] && check_overseerr_ready "$PLEX_APPDATA"; then
-            log "Overseerr is ready! Configuring Radarr/Sonarr..."
-            if configure_overseerr "$MACHINE_IP" "${RADARR_API_KEY:-}" "${SONARR_API_KEY:-}" "$PLEX_APPDATA"; then
-                OVERSEERR_CONFIGURED=true
-                NEED_OVERSEERR_POLL=false
-                log "Overseerr → Radarr + Sonarr configured!"
+        # Check Seerr
+        if [ "$NEED_SEERR_POLL" = true ] && check_seerr_ready "$PLEX_APPDATA"; then
+            log "Seerr is ready! Configuring Radarr/Sonarr..."
+            if configure_seerr "$MACHINE_IP" "${RADARR_API_KEY:-}" "${SONARR_API_KEY:-}" "$PLEX_APPDATA"; then
+                SEERR_CONFIGURED=true
+                NEED_SEERR_POLL=false
+                log "Seerr → Radarr + Sonarr configured!"
             fi
         fi
 
@@ -1010,7 +1144,7 @@ if [ "$NEED_OVERSEERR_POLL" = true ] || [ "$NEED_KOMETA_POLL" = true ]; then
         fi
 
         # All done?
-        if [ "$NEED_OVERSEERR_POLL" = false ] && [ "$NEED_KOMETA_POLL" = false ]; then
+        if [ "$NEED_SEERR_POLL" = false ] && [ "$NEED_KOMETA_POLL" = false ]; then
             echo ""
             log "All post-deploy automation complete!"
             break
@@ -1018,7 +1152,7 @@ if [ "$NEED_OVERSEERR_POLL" = true ] || [ "$NEED_KOMETA_POLL" = true ]; then
 
         # Status
         WAITING_FOR=""
-        [ "$NEED_OVERSEERR_POLL" = true ] && WAITING_FOR="Overseerr wizard"
+        [ "$NEED_SEERR_POLL" = true ] && WAITING_FOR="Seerr wizard"
         if [ "$NEED_KOMETA_POLL" = true ]; then
             [ -n "$WAITING_FOR" ] && WAITING_FOR="$WAITING_FOR + "
             WAITING_FOR="${WAITING_FOR}Plex libraries"
@@ -1027,7 +1161,7 @@ if [ "$NEED_OVERSEERR_POLL" = true ] || [ "$NEED_KOMETA_POLL" = true ]; then
     done
 
     if [ $POLL_ELAPSED -ge $POLL_MAX ]; then
-        [ "$NEED_OVERSEERR_POLL" = true ] && warn "Overseerr: timed out. Re-run to configure."
+        [ "$NEED_SEERR_POLL" = true ] && warn "Seerr: timed out. Re-run to configure."
         [ "$NEED_KOMETA_POLL" = true ] && warn "Kometa: timed out. Run manually: docker exec kometa python kometa.py --run"
     fi
 fi

@@ -72,7 +72,7 @@
 
 - System:
     - Seerr:
-        icon: overseerr.svg
+        icon: seerr.svg
         href: http://{{HOMEPAGE_VAR_HOST}}:5055
     - Dozzle:
         icon: dozzle.svg

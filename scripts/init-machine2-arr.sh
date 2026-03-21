@@ -2057,3 +2057,10 @@ echo "  To re-run post-deploy config after manual steps:"
 echo "    sudo ../scripts/init-machine2-arr.sh"
 echo "    (safe to re-run — skips already-configured items)"
 echo ""
+
+# --- Post-deploy automated setup (Plex libraries, Immich admin, etc.) ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/post-setup.py" ] && command -v python3 &>/dev/null; then
+    info "Running automated post-deploy setup..."
+    python3 "$SCRIPT_DIR/post-setup.py" || true
+fi
