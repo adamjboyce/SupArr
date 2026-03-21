@@ -454,14 +454,6 @@ collect_arr_questions() {
         fi
     fi
 
-    # Backward compat — map to NORD_ vars for existing compose references
-    NORD_VPN_TYPE="$VPN_TYPE"
-    NORD_USER="$VPN_USER"
-    NORD_PASS="$VPN_PASS"
-    NORD_WIREGUARD_KEY="$VPN_WIREGUARD_KEY"
-    NORD_COUNTRY="${VPN_SERVER_COUNTRIES:-}"
-    NORD_CITY="${VPN_SERVER_CITIES:-}"
-
     header "qBittorrent"
     echo -e "  ${DIM}Setting a custom password now so you don't have to change it later.${NC}\n"
     ask QBIT_PASSWORD "qBittorrent web UI password" "SupArr2026!" "secret"
