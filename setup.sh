@@ -538,6 +538,8 @@ SABNZBD_API_KEY=${SABNZBD_API_KEY}
 NZBGEEK_API_KEY=${NZBGEEK_API_KEY}
 SUBDL_API_KEY=${SUBDL_API_KEY:-}
 OPENSUBTITLES_USERNAME=${OPENSUBTITLES_USERNAME:-}
+AUTOBRR_API_KEY=${AUTOBRR_API_KEY:-}
+MACHINE_IP=$(hostname -I 2>/dev/null | awk '{print \$1}')
 OPENSUBTITLES_PASSWORD=${OPENSUBTITLES_PASSWORD:-}
 NOTIFIARR_API_KEY=${NOTIFIARR_API_KEY}
 TRAKT_ACCESS_TOKEN=${TRAKT_ACCESS_TOKEN:-}
@@ -891,9 +893,17 @@ if [ "$ROLE" = "arr" ] || [ "$ROLE" = "both" ]; then
     echo -e "    ${BOLD}SABnzbd${NC}  →  http://localhost:8085"
     echo -e "    ${DIM}Run setup wizard, add Usenet server credentials${NC}"
     echo ""
-    echo -e "    ${BOLD}Bazarr${NC}  →  http://localhost:6767"
-    echo -e "    ${DIM}Verify: Languages → English → Forced = Both${NC}"
-    echo -e "    ${DIM}Add providers: OpenSubtitles.com (free account)${NC}"
+    echo -e "    ${BOLD}Bazarr${NC}  →  http://localhost:6767  ${GREEN}(auto-configured)${NC}"
+    echo -e "    ${DIM}Subtitles: English + Forced. Providers pre-configured.${NC}"
+    if [ -z "${SUBDL_API_KEY:-}" ] && [ -z "${OPENSUBTITLES_USERNAME:-}" ]; then
+        echo -e "    ${DIM}Tip: Add OpenSubtitles.com account in Settings → Providers for better coverage${NC}"
+    fi
+    echo ""
+    echo -e "    ${BOLD}Autobrr${NC}  →  http://localhost:7474  ${GREEN}(auto-configured)${NC}"
+    echo -e "    ${DIM}Connected to Sonarr/Radarr/Lidarr. Add IRC announce channels for instant grabs.${NC}"
+    echo ""
+    echo -e "    ${BOLD}Homepage${NC}  →  http://localhost:3101  ${GREEN}(auto-configured)${NC}"
+    echo -e "    ${DIM}Dashboard with widgets for all services.${NC}"
     echo ""
     echo -e "    ${BOLD}Radarr Lists${NC}  →  http://localhost:7878/settings/importlists"
     echo -e "    ${DIM}The CouchPotato replacement:${NC}"
@@ -901,8 +911,14 @@ if [ "$ROLE" = "arr" ] || [ "$ROLE" = "both" ]; then
     echo -e "    ${DIM}  2. Add as MDBList import in Radarr${NC}"
     echo -e "    ${DIM}  3. Auto-downloads matching movies forever${NC}"
     echo ""
+    echo -e "    ${BOLD}Stash${NC}  →  http://localhost:9999  ${GREEN}(auto-configured)${NC}"
+    echo -e "    ${DIM}Adult content organizer. Initial scan runs automatically.${NC}"
+    echo ""
+    echo -e "    ${BOLD}Audiobookshelf${NC}  →  http://localhost:13378  ${GREEN}(auto-configured)${NC}"
+    echo -e "    ${DIM}Audiobook/podcast server. Admin account + libraries pre-created.${NC}"
+    echo ""
     echo -e "    ${BOLD}Immich${NC}  →  http://localhost:2283"
-    echo -e "    ${DIM}Create admin account, install Android app, enable background backup${NC}"
+    echo -e "    ${DIM}Self-hosted Google Photos. Create admin account, install Android app.${NC}"
     echo ""
     echo -e "    ${BOLD}Syncthing${NC}  →  http://localhost:8384"
     echo -e "    ${DIM}Set admin password, pair phone, share folders (DCIM, Downloads, etc.)${NC}"
