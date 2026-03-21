@@ -134,17 +134,29 @@ def classify_issue(record: dict) -> str:
 
 
 def scan_queue(arr_name: str, config: dict, api_key: str) -> list[ImportAction]:
-    """Scan an arr's completed queue for actionable items."""
+    """Scan an arr's completed queue for actionable items (all pages)."""
     actions: list[ImportAction] = []
 
-    data = api_call(
-        config["base"], api_key,
-        f"/queue?pageSize=100&status=completed{config['queue_params']}",
-    )
-    if not data or not isinstance(data, dict):
-        return actions
+    # Fetch all pages — a single page missed the 300+ item backlog
+    records = []
+    for page in range(1, 20):
+        data = api_call(
+            config["base"], api_key,
+            f"/queue?pageSize=500&page={page}{config['queue_params']}",
+        )
+        if not data or not isinstance(data, dict):
+            break
+        page_recs = data.get("records", [])
+        # Only keep items that need action (warning/blocked/pending)
+        for r in page_recs:
+            state = r.get("trackedDownloadState", "")
+            status = r.get("trackedDownloadStatus", "")
+            if state in ("importBlocked", "importPending") or status == "warning":
+                records.append(r)
+        total = data.get("totalRecords", 0)
+        if page * 500 >= total:
+            break
 
-    records = data.get("records", [])
     if not records:
         return actions
 
@@ -327,7 +339,10 @@ def main():
                         total_success += 1
                         log.info("  -> OK")
                     else:
-                        log.warning("  -> FAILED (no importable files)")
+                        # Import failed (no files on disk) — remove from queue
+                        # so it stops blocking and the arr can re-grab
+                        log.warning("  -> FAILED, removing from queue")
+                        execute_remove(config, api_key, action, delete_from_client=True)
                 else:
                     total_success += 1
 
