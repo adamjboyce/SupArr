@@ -146,9 +146,58 @@ else:
     rm -f /tmp/qbit_stalled_count.txt
 }
 
+cleanup_seeded_torrents() {
+    # Remove torrents that finished seeding (paused after hitting ratio limit).
+    # qBit pauses at ratio so Sonarr/Radarr can import first. After 24h paused,
+    # the arr has had its chance — safe to delete the torrent and files.
+    # This prevents paused torrents from piling up on disk.
+    local response
+    response=$(curl -sf "${QBIT_API}/torrents/info?filter=all" 2>/dev/null)
+    if [ -z "$response" ]; then
+        log "WARN: Could not reach qBittorrent API — skipping seeded cleanup"
+        return
+    fi
+
+    local result
+    result=$(echo "$response" | python3 -c "
+import sys, json, time
+t = json.load(sys.stdin)
+now = time.time()
+threshold = 24 * 3600  # 24 hours paused
+remove = []
+for x in t:
+    # pausedUP = paused after completing (seeded to ratio)
+    # Completed torrents that have been paused for 24h+
+    if x['state'] == 'pausedUP' and x['progress'] >= 1:
+        # completion_on is when download finished, but we want time since pause
+        # Use last_activity as proxy — no activity for 24h means safe to remove
+        last = x.get('last_activity', 0)
+        if last > 0 and (now - last) >= threshold:
+            remove.append(x['hash'])
+if remove:
+    print('|'.join(remove))
+    print(len(remove), file=sys.stderr)
+else:
+    print('', file=sys.stderr)
+" 2>/tmp/qbit_seeded_count.txt)
+
+    local count
+    count=$(cat /tmp/qbit_seeded_count.txt 2>/dev/null)
+
+    if [ -n "$result" ]; then
+        curl -sf -X POST "${QBIT_API}/torrents/delete" \
+            -d "hashes=${result}&deleteFiles=true" > /dev/null 2>&1
+        log "Seeded torrents: removed ${count} paused torrents (seeded, inactive 24h+)"
+    else
+        log "Seeded torrents: none ready for cleanup"
+    fi
+    rm -f /tmp/qbit_seeded_count.txt
+}
+
 log "=== Download cleanup started ==="
 cleanup_dir "$TORRENT_COMPLETE" "$TORRENT_AGE_DAYS" "Torrents-complete"
 cleanup_dir "$USENET_COMPLETE" "$USENET_AGE_DAYS" "Usenet-complete"
 cleanup_usenet_incomplete
 cleanup_stalled_torrents
+cleanup_seeded_torrents
 log "=== Download cleanup complete ==="
