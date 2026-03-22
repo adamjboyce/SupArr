@@ -518,14 +518,14 @@ if [ -n "${PLEX_TOKEN:-}" ]; then
                 log "  Library '$name' already exists"
                 return
             fi
-            curl -sf -X POST "${PLEX_URL}/library/sections" \
+            curl -sf -X POST "${PLEX_URL}/library/sections" -G \
                 -H "X-Plex-Token: ${PLEX_TOKEN}" \
                 --data-urlencode "name=${name}" \
                 --data-urlencode "type=${type}" \
                 --data-urlencode "agent=${agent}" \
                 --data-urlencode "scanner=${scanner}" \
                 --data-urlencode "language=en-US" \
-                --data-urlencode "location[0][path]=${path}" > /dev/null 2>&1 && \
+                --data-urlencode "location=${path}" > /dev/null 2>&1 && \
                 log "  Library '${name}' created → ${path}" || \
                 warn "  Could not create library '${name}'"
         }

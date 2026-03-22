@@ -200,6 +200,19 @@ class SupArrHandler(BaseHTTPRequestHandler):
             return
         project_dir = self.server.project_dir
         existing = config.load_existing_env(project_dir)
+
+        # Merge wizard-only fields (IPs, SSH password) from saved wizard config
+        wizard_path = os.path.join(project_dir, ".wizard-config.json")
+        try:
+            if os.path.exists(wizard_path):
+                with open(wizard_path) as f:
+                    wizard_cfg = json.load(f)
+                for k, v in wizard_cfg.items():
+                    if k not in existing and v:
+                        existing[k] = v
+        except Exception:
+            pass
+
         self._send_json({"config": existing, "found": bool(existing)})
 
     def _post_config_validate(self):
@@ -237,6 +250,15 @@ class SupArrHandler(BaseHTTPRequestHandler):
 
         config.write_env(plex_env, plex_path)
         config.write_env(arr_env, arr_path)
+
+        # Persist full wizard config (IPs, SSH password, etc. that aren't in .env)
+        wizard_path = os.path.join(project_dir, ".wizard-config.json")
+        try:
+            with open(wizard_path, "w") as f:
+                json.dump(cfg, f)
+            os.chmod(wizard_path, 0o600)
+        except Exception:
+            pass  # non-fatal — .env files are the primary persistence
 
         self._send_json({
             "ok": True,
@@ -349,10 +371,19 @@ class SupArrHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "message": "Deploy already in progress"})
             return
 
+        # Pre-flight: ensure local tools (rsync, ssh) are available
+        ok, msg = deployer.preflight_check()
+        if not ok:
+            self._send_json({"ok": False, "message": msg})
+            return
+
         project_dir = self.server.project_dir
         self.server._last_config = cfg
         deployer.start_deploy(cfg, project_dir)
-        self._send_json({"ok": True, "message": "Deploy started"})
+        started_msg = "Deploy started"
+        if msg:
+            started_msg += f" ({msg})"
+        self._send_json({"ok": True, "message": started_msg})
 
     def _post_deploy_cancel(self):
         if not self._check_auth():

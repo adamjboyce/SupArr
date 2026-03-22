@@ -10,6 +10,8 @@ import json
 import os
 import re
 import shlex
+import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -17,6 +19,42 @@ import urllib.request
 from queue import Queue, Empty
 
 from deploy import ssh, config
+
+
+# ── Pre-flight checks ────────────────────────────────────────────────────────
+
+REQUIRED_TOOLS = ["rsync", "ssh"]
+
+
+def preflight_check():
+    """Verify local dependencies, auto-installing any that are missing.
+    Returns (ok, message).
+    """
+    missing = [t for t in REQUIRED_TOOLS if shutil.which(t) is None]
+    if not missing:
+        return True, ""
+
+    # Auto-install via apt
+    try:
+        subprocess.run(
+            ["sudo", "apt-get", "update", "-qq"],
+            check=True, capture_output=True, timeout=60,
+        )
+        subprocess.run(
+            ["sudo", "apt-get", "install", "-y", "-qq"] + missing,
+            check=True, capture_output=True, timeout=120,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
+        names = ", ".join(missing)
+        return False, f"Failed to install {names}: {e}. Install manually: sudo apt-get install -y {' '.join(missing)}"
+
+    # Verify they're actually available now
+    still_missing = [t for t in missing if shutil.which(t) is None]
+    if still_missing:
+        names = ", ".join(still_missing)
+        return False, f"Installed but still not found: {names}. Check your PATH."
+
+    return True, f"Auto-installed: {', '.join(missing)}"
 
 REMOTE_PROJECT_PATH = "/opt/suparr"
 

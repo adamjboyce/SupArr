@@ -119,11 +119,15 @@ def setup_plex_libraries():
     for name, lib_type, path, scanner, agent in libraries:
         if name.lower() in existing:
             continue
+        from urllib.parse import urlencode
+        params = urlencode({
+            "name": name, "type": lib_type, "agent": agent,
+            "scanner": scanner, "language": "en-US", "location": path,
+        })
         result = subprocess.run(
             ["curl", "-sf", "-X", "POST",
-             f"{base}/library/sections",
-             "-H", f"X-Plex-Token: {plex_token}",
-             "-d", f"name={name}&type={lib_type}&agent={agent}&scanner={scanner}&language=en-US&location={path}"],
+             f"{base}/library/sections?{params}",
+             "-H", f"X-Plex-Token: {plex_token}"],
             capture_output=True, text=True, timeout=10,
         )
         if result.returncode == 0:

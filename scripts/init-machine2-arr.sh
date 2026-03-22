@@ -1524,11 +1524,11 @@ if [ -n "${BAZARR_API_KEY:-}" ]; then
     info "Configuring Bazarr..."
     sleep 5  # Bazarr is slow to init
 
-    local BZ="http://localhost:6767"
-    local BZ_AUTH="-H X-API-KEY:${BAZARR_API_KEY}"
+    BZ="http://localhost:6767"
+    BZ_AUTH="-H X-API-KEY:${BAZARR_API_KEY}"
 
     # Wait for Bazarr API
-    local bz_ready=false
+    bz_ready=false
     for _ in $(seq 1 15); do
         if curl -sf -o /dev/null "${BZ}/api/system/status" ${BZ_AUTH} 2>/dev/null; then
             bz_ready=true; break
@@ -1577,7 +1577,7 @@ if [ -n "${BAZARR_API_KEY:-}" ]; then
 
     # ── Subtitle providers ───────────────────────────────────────────────
     # Build provider list — always include credential-free providers
-    local PROVIDERS='["podnapisi","subf2m","animetosho"'
+    PROVIDERS='["podnapisi","subf2m","animetosho"'
 
     # SubDL (optional — needs API key)
     if [ -n "${SUBDL_API_KEY:-}" ]; then
@@ -1624,13 +1624,13 @@ if [ -n "${BAZARR_API_KEY:-}" ]; then
         log "  Bazarr: providers enabled (${PROVIDERS})" || true
 
     # ── Enable English language ──────────────────────────────────────────
-    local BZ_DB="$APPDATA/bazarr/config/db/bazarr.db"
+    BZ_DB="$APPDATA/bazarr/config/db/bazarr.db"
     if [ -f "$BZ_DB" ]; then
         sqlite3 "$BZ_DB" "UPDATE table_settings_languages SET enabled = 1 WHERE code3 = 'eng';" 2>/dev/null && \
             log "  Bazarr: English language enabled" || true
 
         # ── Create language profile: English + Forced ────────────────────
-        local profile_exists
+        profile_exists=""
         profile_exists=$(sqlite3 "$BZ_DB" "SELECT COUNT(*) FROM table_languages_profiles WHERE name = 'English + Forced';" 2>/dev/null || echo "0")
         if [ "${profile_exists:-0}" -eq 0 ]; then
             sqlite3 "$BZ_DB" "INSERT INTO table_languages_profiles (\"profileId\", cutoff, \"originalFormat\", items, name, \"mustContain\", \"mustNotContain\") VALUES (1, 65535, 0, '[{\"id\": 1, \"language\": \"en\", \"forced\": false, \"hi\": false, \"audio_exclude\": false}, {\"id\": 2, \"language\": \"en\", \"forced\": true, \"hi\": false, \"audio_exclude\": false}]', 'English + Forced', '[]', '[]');" 2>/dev/null && \
@@ -1657,10 +1657,10 @@ fi
 
 # --- AUTOBRR: onboard + download clients ---
 info "Configuring Autobrr..."
-local AUTOBRR_URL="http://localhost:7474"
+AUTOBRR_URL="http://localhost:7474"
 
 # Wait for Autobrr API
-local autobrr_ready=false
+autobrr_ready=false
 for _ in $(seq 1 15); do
     if curl -sf -o /dev/null "${AUTOBRR_URL}/api/healthz" 2>/dev/null || \
        curl -sf -o /dev/null "${AUTOBRR_URL}" 2>/dev/null; then
@@ -1671,8 +1671,8 @@ done
 
 if [ "$autobrr_ready" = true ]; then
     # Check if onboarding is needed (no users exist)
-    local autobrr_needs_onboard
-    autobrr_needs_onboard=$(curl -s -o /dev/null -w '%{http_code}' "${AUTOBRR_URL}/api/auth/onboard" -X HEAD 2>/dev/null)
+    autobrr_needs_onboard=""
+    autobrr_needs_onboard=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "${AUTOBRR_URL}/api/auth/onboard" 2>/dev/null)
 
     # Create user if onboarding available
     if curl -s -X POST "${AUTOBRR_URL}/api/auth/onboard" \
@@ -1687,7 +1687,7 @@ if [ "$autobrr_ready" = true ]; then
         -d "{\"username\":\"admin\",\"password\":\"${QBIT_PASSWORD:-SupArr2026}\"}" \
         -c /tmp/autobrr_cookies.txt > /dev/null 2>&1
 
-    local AUTOBRR_API_KEY
+    AUTOBRR_API_KEY=""
     AUTOBRR_API_KEY=$(curl -s -X POST "${AUTOBRR_URL}/api/keys" \
         -b /tmp/autobrr_cookies.txt \
         -H "Content-Type: application/json" \
@@ -1699,7 +1699,7 @@ if [ "$autobrr_ready" = true ]; then
         update_env_key "AUTOBRR_API_KEY" "$AUTOBRR_API_KEY" --force
 
         # Add download clients
-        local autobrr_header="-H X-API-Token:${AUTOBRR_API_KEY}"
+        autobrr_header="-H X-API-Token:${AUTOBRR_API_KEY}"
 
         if [ -n "${SONARR_API_KEY:-}" ]; then
             curl -sf -X POST "${AUTOBRR_URL}/api/download_clients" \
@@ -1735,8 +1735,8 @@ fi
 
 # --- HOMEPAGE: seed config from templates ---
 info "Configuring Homepage..."
-local HOMEPAGE_CONFIG="$APPDATA/homepage/config"
-local HOMEPAGE_SEEDS="$(dirname "$0")/../config-seeds/homepage"
+HOMEPAGE_CONFIG="$APPDATA/homepage/config"
+HOMEPAGE_SEEDS="$(dirname "$0")/../config-seeds/homepage"
 
 if [ -d "$HOMEPAGE_SEEDS" ]; then
     # Copy seed configs

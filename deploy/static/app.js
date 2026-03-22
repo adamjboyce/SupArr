@@ -37,7 +37,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     buildStepper();
     await loadSchema();
     await loadExistingConfig();
-    showStep(1);
+
+    // Check deploy state and route accordingly
+    try {
+        const state = await api('GET', '/api/deploy/status');
+        if (state) {
+            if (['syncing', 'deploying'].includes(state.status)) {
+                // Actively deploying — reconnect to live terminal
+                showStep(9);
+                connectDeploySSE();
+                return;
+            }
+            if (state.status === 'done') {
+                // Completed — show report
+                showStep(10);
+                buildReport(true);
+                return;
+            }
+            if (['error', 'cancelled', 'post_deploy'].includes(state.status)) {
+                // Failed or finished post-deploy — go to review so user can re-deploy
+                showStep(8);
+                return;
+            }
+        }
+    } catch {}
+
+    // Restore last wizard step, or start at 1
+    const saved = parseInt(sessionStorage.getItem('suparr_step'));
+    showStep(saved >= 1 && saved <= 8 ? saved : 1);
 });
 
 async function loadSchema() {
@@ -63,29 +90,29 @@ async function loadSchema() {
 }
 
 async function loadExistingConfig() {
+    // Layer 1: server-side config from .env files
     try {
         const resp = await api('GET', '/api/config/load');
         if (resp.found && resp.config) {
-            // Merge existing values over defaults
             Object.assign(cfg, resp.config);
-            populateForm();
-            return;
         }
     } catch (e) {
         console.error('Failed to load existing config:', e);
     }
-    // Fall back to localStorage if server has no saved config
+    // Layer 2: localStorage fills in wizard-only fields (IPs, SSH password, etc.)
+    // that aren't persisted in .env files. Merge without overwriting server values.
     try {
         const saved = localStorage.getItem('suparr_cfg');
         if (saved) {
             const parsed = JSON.parse(saved);
-            Object.assign(cfg, parsed);
-            populateForm();
-            console.log('Restored config from localStorage');
+            for (const [k, v] of Object.entries(parsed)) {
+                if (!cfg[k] && v) cfg[k] = v;
+            }
         }
     } catch (e) {
         console.error('Failed to restore config from localStorage:', e);
     }
+    populateForm();
 }
 
 // ── API Helper ───────────────────────────────────────────────────────────────
@@ -136,6 +163,9 @@ function showStep(n) {
     const main = document.getElementById('main-content');
     main.classList.toggle('wide', n >= 9);
 
+    // Persist step so refresh doesn't reset (wizard steps only, not deploy/report)
+    if (n <= 8) sessionStorage.setItem('suparr_step', n);
+
     updateStepper();
     updateConditionalFields();
     if (n === 6) buildPicker();
@@ -164,7 +194,9 @@ function collectFormValues() {
         const key = el.dataset.key;
         if (el.type === 'checkbox') {
             cfg[key] = el.checked ? 'true' : 'false';
-        } else {
+        } else if (el.value) {
+            // Only overwrite with non-empty values — prevents blank fields
+            // on unvisited steps from nuking saved config
             cfg[key] = el.value;
         }
     });
@@ -682,7 +714,7 @@ async function startDeploy() {
 
     // Switch to deploy progress view
     terminalLines = [];
-    showStep(8);
+    showStep(9);
     connectDeploySSE();
 }
 

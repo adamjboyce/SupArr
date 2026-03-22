@@ -1,6 +1,7 @@
 # Environment files (contain secrets)
 .env
 *.env
+.wizard-config.json
 
 # Editor swap files
 *.swp
