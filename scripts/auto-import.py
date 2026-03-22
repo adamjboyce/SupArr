@@ -293,7 +293,8 @@ def execute_import(config: dict, api_key: str, action: ImportAction) -> bool:
     return bool(result and result.get("id"))
 
 
-def execute_remove(config: dict, api_key: str, action: ImportAction, delete_from_client: bool = False) -> bool:
+def execute_remove(config: dict, api_key: str, action: ImportAction,
+                   delete_from_client: bool = False, blocklist: bool = False) -> bool:
     """Remove items from the queue."""
     result = api_call(
         config["base"], api_key, "/queue/bulk",
@@ -301,7 +302,7 @@ def execute_remove(config: dict, api_key: str, action: ImportAction, delete_from
         data={
             "ids": action.queue_ids,
             "removeFromClient": delete_from_client,
-            "blocklist": False,
+            "blocklist": blocklist,
             "skipRedownload": True,
         },
     )
@@ -339,10 +340,10 @@ def main():
                         total_success += 1
                         log.info("  -> OK")
                     else:
-                        # Import failed (no files on disk) — remove from queue
-                        # so it stops blocking and the arr can re-grab
-                        log.warning("  -> FAILED, removing from queue")
-                        execute_remove(config, api_key, action, delete_from_client=True)
+                        # Import failed (no files on disk) — remove and blocklist
+                        # so the arr doesn't re-grab the same broken release
+                        log.warning("  -> FAILED, removing + blocklisting")
+                        execute_remove(config, api_key, action, delete_from_client=True, blocklist=True)
                 else:
                     total_success += 1
 
