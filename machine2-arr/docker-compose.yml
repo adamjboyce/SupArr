@@ -72,6 +72,7 @@ services:
   qbittorrent:
     image: linuxserver/qbittorrent:latest
     container_name: qbittorrent
+    profiles: ["svc-qbittorrent"]
     restart: unless-stopped
     network_mode: "service:gluetun"
     depends_on:
@@ -98,6 +99,7 @@ services:
   sabnzbd:
     image: linuxserver/sabnzbd:latest
     container_name: sabnzbd
+    profiles: ["svc-sabnzbd"]
     restart: unless-stopped
     network_mode: "service:gluetun"
     depends_on:
@@ -145,6 +147,7 @@ services:
   prowlarr:
     image: linuxserver/prowlarr:latest
     container_name: prowlarr
+    profiles: ["svc-prowlarr"]
     restart: unless-stopped
     environment:
       - PUID=${PUID}
@@ -164,6 +167,7 @@ services:
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     container_name: flaresolverr
+    profiles: ["svc-flaresolverr"]
     restart: unless-stopped
     environment:
       - LOG_LEVEL=info
@@ -182,6 +186,7 @@ services:
   radarr:
     image: linuxserver/radarr:latest
     container_name: radarr
+    profiles: ["svc-radarr"]
     restart: unless-stopped
     environment:
       - PUID=${PUID}
@@ -207,6 +212,7 @@ services:
   sonarr:
     image: linuxserver/sonarr:latest
     container_name: sonarr
+    profiles: ["svc-sonarr"]
     restart: unless-stopped
     environment:
       - PUID=${PUID}
@@ -229,6 +235,7 @@ services:
   lidarr:
     image: linuxserver/lidarr:latest
     container_name: lidarr
+    profiles: ["svc-lidarr"]
     restart: unless-stopped
     environment:
       - PUID=${PUID}
@@ -250,6 +257,7 @@ services:
   bookshelf:
     image: ghcr.io/pennydreadful/bookshelf:softcover
     container_name: bookshelf
+    profiles: ["svc-bookshelf"]
     restart: unless-stopped
     environment:
       - PUID=${PUID}
@@ -272,6 +280,7 @@ services:
   audiobookshelf:
     image: ghcr.io/advplyr/audiobookshelf:latest
     container_name: audiobookshelf
+    profiles: ["svc-audiobookshelf"]
     restart: unless-stopped
     environment:
       - TZ=${TZ}
@@ -292,6 +301,7 @@ services:
   bazarr:
     image: linuxserver/bazarr:latest
     container_name: bazarr
+    profiles: ["svc-bazarr"]
     restart: unless-stopped
     environment:
       - PUID=${PUID}
@@ -314,6 +324,7 @@ services:
   whisparr:
     image: ghcr.io/hotio/whisparr:v3
     container_name: whisparr
+    profiles: ["svc-whisparr"]
     restart: unless-stopped
     environment:
       - PUID=${PUID}
@@ -337,35 +348,11 @@ services:
       retries: 3
       start_period: 30s
 
-  stash:
-    image: stashapp/stash:latest
-    container_name: stash
-    restart: unless-stopped
-    environment:
-      - STASH_STASH=/data
-      - STASH_GENERATED=/generated
-      - STASH_METADATA=/metadata
-      - STASH_CACHE=/cache
-      - STASH_PORT=9999
-    ports: ["9999:9999"]
-    volumes:
-      - ${APPDATA}/stash/config:/root/.stash
-      - ${APPDATA}/stash/generated:/generated
-      - ${APPDATA}/stash/metadata:/metadata
-      - ${APPDATA}/stash/cache:/cache
-      - ${MEDIA_ROOT}/adult:/data
-    networks: [arr-net]
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:9999 || exit 1"]
-      interval: 60s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
   # ── Quality & Automation ───────────────────────────────────────────────────
   recyclarr:
     image: ghcr.io/recyclarr/recyclarr:latest
     container_name: recyclarr
+    profiles: ["svc-recyclarr"]
     restart: unless-stopped
     environment:
       - TZ=${TZ}
@@ -376,6 +363,7 @@ services:
   autobrr:
     image: ghcr.io/autobrr/autobrr:latest
     container_name: autobrr
+    profiles: ["svc-autobrr"]
     restart: unless-stopped
     environment:
       - TZ=${TZ}
@@ -418,6 +406,7 @@ services:
   notifiarr:
     image: golift/notifiarr:latest
     container_name: notifiarr
+    profiles: ["svc-notifiarr"]
     restart: unless-stopped
     environment:
       - TZ=${TZ}
@@ -533,6 +522,7 @@ services:
   immich-server:
     image: ghcr.io/immich-app/immich-server:release
     container_name: immich-server
+    profiles: ["svc-immich"]
     restart: unless-stopped
     depends_on:
       immich-redis:  { condition: service_started }
@@ -563,6 +553,7 @@ services:
   immich-ml:
     image: ghcr.io/immich-app/immich-machine-learning:release
     container_name: immich-ml
+    profiles: ["svc-immich"]
     restart: unless-stopped
     environment:
       - TZ=${TZ}
@@ -573,6 +564,7 @@ services:
   immich-redis:
     image: docker.io/redis:6.2-alpine
     container_name: immich-redis
+    profiles: ["svc-immich"]
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
@@ -584,6 +576,7 @@ services:
   immich-db:
     image: docker.io/tensorchord/pgvecto-rs:pg14-v0.2.0
     container_name: immich-db
+    profiles: ["svc-immich"]
     restart: unless-stopped
     environment:
       - POSTGRES_DB=immich
@@ -603,6 +596,7 @@ services:
   syncthing:
     image: linuxserver/syncthing:latest
     container_name: syncthing
+    profiles: ["svc-syncthing"]
     restart: unless-stopped
     environment:
       - PUID=${PUID}
@@ -688,6 +682,7 @@ services:
   weekly-digest:
     image: alpine:latest
     container_name: weekly-digest
+    profiles: ["svc-digest"]
     restart: unless-stopped
     entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl jq bash coreutils > /dev/null 2>&1 && exec bash /scripts/weekly-digest.sh"]
     environment:
@@ -701,23 +696,3 @@ services:
       - ../scripts/weekly-digest.sh:/scripts/weekly-digest.sh:ro
     networks: [arr-net]
 
-  # ── Stash Studio Tagger ─────────────────────────────────────────────────
-  stash-tagger:
-    image: alpine:latest
-    container_name: stash-tagger
-    restart: unless-stopped
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl jq bash coreutils > /dev/null 2>&1 && exec bash /scripts/stash-studio-tagger.sh"]
-    environment:
-      - STASH_URL=http://stash:9999
-      - CHECK_INTERVAL=1800
-      - GENERATE_COVERS=true
-      - GENERATE_SPRITES=true
-      - GENERATE_PHASHES=true
-      - GENERATE_PREVIEWS=true
-      - TZ=${TZ}
-    volumes:
-      - ../scripts/stash-studio-tagger.sh:/scripts/stash-studio-tagger.sh:ro
-    depends_on:
-      stash:
-        condition: service_healthy
-    networks: [arr-net]

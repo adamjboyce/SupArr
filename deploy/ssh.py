@@ -22,6 +22,15 @@ SSH_OPTS = [
     "-o", "ServerAliveInterval=30",
     "-o", "ServerAliveCountMax=10",
     "-o", "ConnectTimeout=10",
+    "-o", "BatchMode=yes",
+]
+
+# For password-based operations (sshpass + ssh-copy-id) — no BatchMode
+SSH_OPTS_PASSWORD = [
+    "-o", "StrictHostKeyChecking=no",
+    "-o", "UserKnownHostsFile=/dev/null",
+    "-o", "LogLevel=ERROR",
+    "-o", "ConnectTimeout=10",
 ]
 
 # API keys to preserve from remote .env on re-deploy
@@ -80,7 +89,7 @@ def deploy_key(host, user, password):
         if not gen["ok"]:
             return gen
     result = subprocess.run(
-        ["sshpass", "-p", password, "ssh-copy-id"] + SSH_OPTS +
+        ["sshpass", "-p", password, "ssh-copy-id"] + SSH_OPTS_PASSWORD +
         ["-i", SSH_KEY_PATH, f"{user}@{host}"],
         capture_output=True, text=True, timeout=30
     )
@@ -89,25 +98,61 @@ def deploy_key(host, user, password):
     return {"ok": True, "message": f"Key deployed to {host}"}
 
 
-def setup_root_access(host, user, password):
-    """If SSH user is not root, set up key-only root login.
-    Copies the deploy key to root's authorized_keys and enables
-    PermitRootLogin prohibit-password.
+def _sshpass_exec(host, user, password, cmd_str, timeout=30):
+    """Execute a command on a remote host using sshpass for password auth."""
+    result = subprocess.run(
+        ["sshpass", "-p", password, "ssh"] + SSH_OPTS_PASSWORD +
+        [f"{user}@{host}", cmd_str],
+        capture_output=True, text=True, timeout=timeout
+    )
+    return result
+
+
+def setup_root_access(host, user, password, root_password=""):
+    """Set up key-only root login from scratch.
+
+    Uses the SSH password to connect as the user, and the root password
+    to escalate via su -c to grant NOPASSWD sudo. Both passwords are
+    used once during setup and never stored.
+
+    Flow:
+    1. sshpass as user → su -c with root password → grant NOPASSWD sudo
+    2. Deploy SSH key to user via sshpass
+    3. Use user's sudo to copy key to root + enable PermitRootLogin
+    4. Verify root key auth works
+
+    NOPASSWD is revoked after deploy completes (see deployer.py finally block).
     """
     if user == "root":
-        return {"ok": True, "message": "Already root"}
+        # Just deploy key directly to root
+        return deploy_key(host, "root", password)
 
     # Test if root key auth already works
     test = test_connection(host, "root")
     if test["ok"]:
         return {"ok": True, "message": "Root key auth already working"}
 
-    # Deploy key to non-root user first
+    # Step 1: SSH as user with forced TTY, pipe root password to su -c
+    root_pw = root_password or password
+    sudoers_cmd = (
+        f"printf '%s\\n' {shlex.quote(root_pw)} | "
+        f"su -c 'echo \"{user} ALL=(ALL) NOPASSWD: ALL\" > /etc/sudoers.d/{user} "
+        f"&& chmod 440 /etc/sudoers.d/{user}'"
+    )
+    result = subprocess.run(
+        ["sshpass", "-p", password, "ssh", "-tt"] + SSH_OPTS_PASSWORD +
+        [f"{user}@{host}", sudoers_cmd],
+        capture_output=True, text=True, timeout=30
+    )
+    if result.returncode != 0:
+        return {"ok": False, "message": f"Could not grant sudo (check root password): {result.stderr.strip()}"}
+
+    # Step 2: Deploy SSH key to user
     deploy_result = deploy_key(host, user, password)
     if not deploy_result["ok"]:
         return deploy_result
 
-    # Copy key to root via the non-root user
+    # Step 3: Copy key to root via passwordless sudo
     pubkey = Path(SSH_KEY_PATH + ".pub").read_text().strip()
     commands = [
         "sudo mkdir -p /root/.ssh",
@@ -125,7 +170,7 @@ def setup_root_access(host, user, password):
     if result.returncode != 0:
         return {"ok": False, "message": f"Root setup failed: {result.stderr.strip()}"}
 
-    # Verify root access works
+    # Step 4: Verify root access works
     test = test_connection(host, "root")
     if not test["ok"]:
         return {"ok": False, "message": "Root key deployed but verification failed"}

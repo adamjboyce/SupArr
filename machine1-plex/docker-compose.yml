@@ -230,3 +230,106 @@ services:
       - ${APPDATA}:/data:ro
       - ${APPDATA}/backups:/backups
     networks: [media-net]
+
+  # ── Adult Content Browser ──────────────────────────────────────────────────
+  stash:
+    image: stashapp/stash:latest
+    container_name: stash
+    profiles: ["svc-stash"]
+    restart: unless-stopped
+    environment:
+      - STASH_STASH=/data
+      - STASH_GENERATED=/generated
+      - STASH_METADATA=/metadata
+      - STASH_CACHE=/cache
+      - STASH_PORT=9999
+    ports: ["9999:9999"]
+    volumes:
+      - ${APPDATA}/stash/config:/root/.stash
+      - ${APPDATA}/stash/generated:/generated
+      - ${APPDATA}/stash/metadata:/metadata
+      - ${APPDATA}/stash/cache:/cache
+      - ${MEDIA_ROOT}/adult:/data
+    networks: [media-net]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:9999 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  stash-tagger:
+    image: alpine:latest
+    container_name: stash-tagger
+    profiles: ["svc-stash"]
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl jq bash coreutils > /dev/null 2>&1 && exec bash /scripts/stash-studio-tagger.sh"]
+    environment:
+      - STASH_URL=http://stash:9999
+      - CHECK_INTERVAL=1800
+      - GENERATE_COVERS=true
+      - GENERATE_SPRITES=true
+      - GENERATE_PHASHES=true
+      - GENERATE_PREVIEWS=true
+      - TZ=${TZ}
+    volumes:
+      - ../scripts/stash-studio-tagger.sh:/scripts/stash-studio-tagger.sh:ro
+    depends_on:
+      stash:
+        condition: service_healthy
+    networks: [media-net]
+
+  # ── Disc Ripping ───────────────────────────────────────────────────────────
+  makemkv:
+    image: jlesage/makemkv:latest
+    container_name: makemkv
+    profiles: ["svc-makemkv"]
+    restart: unless-stopped
+    environment:
+      - USER_ID=${PUID}
+      - GROUP_ID=${PGID}
+      - TZ=${TZ}
+      - DARK_MODE=1
+    ports: ["5800:5800"]
+    volumes:
+      - ${APPDATA}/makemkv/config:/config
+      - ${APPDATA}/rips:/output
+      - ${MEDIA_ROOT}:/media:ro
+    devices:
+      - /dev/sr0:/dev/sr0
+      - /dev/sg0:/dev/sg0
+    networks: [media-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5800 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  handbrake:
+    image: jlesage/handbrake:latest
+    container_name: handbrake
+    profiles: ["svc-handbrake"]
+    restart: unless-stopped
+    environment:
+      - USER_ID=${PUID}
+      - GROUP_ID=${PGID}
+      - TZ=${TZ}
+      - DARK_MODE=1
+      - AUTOMATED_CONVERSION_PRESET=General/Very Fast 1080p30
+      - AUTOMATED_CONVERSION_FORMAT=mkv
+    ports: ["5801:5800"]
+    volumes:
+      - ${APPDATA}/handbrake/config:/config
+      - ${APPDATA}/rips:/watch
+      - ${APPDATA}/handbrake/output:/output
+      - ${MEDIA_ROOT}:/media:ro
+    devices:
+      - /dev/dri:/dev/dri
+    networks: [media-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5800 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

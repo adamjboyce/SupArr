@@ -359,6 +359,18 @@ def _deploy_main(cfg, project_dir, state):
         _emit_both(state, "error", f"Deploy error: {e}")
 
     finally:
+        # Revoke NOPASSWD sudo — deploy is done, lock it back down
+        deploy_user = cfg.get("ssh_user", "root")
+        if deploy_user != "root":
+            for host in hosts:
+                try:
+                    ssh.remote_exec(host, "root",
+                        f"rm -f /etc/sudoers.d/{deploy_user}")
+                    _emit_both(state, "log", f"Revoked NOPASSWD sudo on {host}")
+                except Exception:
+                    _emit_both(state, "warning",
+                        f"Could not revoke sudo on {host} — remove /etc/sudoers.d/{deploy_user} manually")
+
         # Clean up temp files
         try:
             import shutil

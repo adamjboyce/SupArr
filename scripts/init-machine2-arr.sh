@@ -62,12 +62,31 @@ else
     exit 1
 fi
 
+# ── Service Selection ──────────────────────────────────────────────────────
+# COMPOSE_PROFILES comes from .env (set by the deploy wizard picker).
+# If empty, all services are considered selected (backward compatible).
+ACTIVE_PROFILES="${COMPOSE_PROFILES:-}"
+
+is_selected() {
+    # Usage: is_selected svc-radarr && { ... }
+    # Returns 0 (true) if the profile is in COMPOSE_PROFILES, or if no picker was used.
+    local profile="$1"
+    [ -z "$ACTIVE_PROFILES" ] && return 0  # no picker = everything selected
+    echo ",$ACTIVE_PROFILES," | grep -qF ",$profile,"
+}
+
 APPDATA="${APPDATA:-/opt/arr-stack}"
 MEDIA_ROOT="${MEDIA_ROOT:-/mnt/media}"
 DOWNLOADS_ROOT="${DOWNLOADS_ROOT:-/mnt/downloads}"
 QBIT_PASSWORD="${QBIT_PASSWORD:-adminadmin}"
 NAS_IP="${NAS_IP:-}"
 NAS_MEDIA_EXPORT="${NAS_MEDIA_EXPORT:-/var/nfs/shared/media}"
+
+# Parse media categories from .env (comma-separated) into a bash-friendly format
+IFS=',' read -ra CATEGORIES <<< "${MEDIA_CATEGORIES:-movies,tv,anime,anime-movies,documentaries,concerts,stand-up,music,books,audiobooks,adult}"
+
+# Helper: check if a category is selected
+has_category() { local c; for c in "${CATEGORIES[@]}"; do [ "$c" = "$1" ] && return 0; done; return 1; }
 
 # Detect the real (non-root) user who should own files and be in docker group.
 # Priority: SUDO_USER (ran via sudo), DEPLOY_USER (set by remote-deploy.sh),
@@ -166,15 +185,31 @@ pkg_install "$PKG_MGR" $BASE_PKGS
 
 log "System packages installed"
 
+# Pre-flight: verify critical commands exist after package install
+for cmd in curl jq git wget; do
+    if ! command -v "$cmd" &>/dev/null; then
+        err "Required command '$cmd' not found after package install"
+        exit 1
+    fi
+done
+log "Pre-flight: all critical commands available"
+
 # ===========================================================================
-header "Phase 1b: Network Environment Evaluation"
+header "Phase 1b: Hardware Profile"
+# ===========================================================================
+
+source "$SCRIPT_DIR/detect-hardware.sh"
+hw_report log
+
+# ===========================================================================
+header "Phase 1c: Network Environment Evaluation"
 # ===========================================================================
 # Informational only — reports findings and recommendations. Changes nothing.
 
 info "Evaluating network environment..."
 
 # Detect primary NIC
-PRIMARY_NIC=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+PRIMARY_NIC=$(ip route show default 2>/dev/null | awk '{print $5; exit}' || true)
 if [ -n "$PRIMARY_NIC" ]; then
     NIC_MTU=$(cat /sys/class/net/"$PRIMARY_NIC"/mtu 2>/dev/null || echo "unknown")
     NIC_MAX_MTU=$(ip -d link show "$PRIMARY_NIC" 2>/dev/null | grep -oP 'maxmtu \K[0-9]+' || echo "unknown")
@@ -207,7 +242,7 @@ if [ -n "$PRIMARY_NIC" ]; then
 
     # NFS version check (will be useful after Phase 4 mounts)
     if command -v nfsstat &>/dev/null; then
-        NFS_VER=$(nfsstat -m 2>/dev/null | grep -oP 'vers=\K[0-9]+' | head -1)
+        NFS_VER=$(nfsstat -m 2>/dev/null | grep -oP 'vers=\K[0-9]+' | head -1 || true)
         if [ -n "$NFS_VER" ]; then
             log "  NFS version in use: v$NFS_VER"
             [ "$NFS_VER" -lt 4 ] 2>/dev/null && warn "  NFSv4 is faster than v$NFS_VER — consider upgrading NFS exports"
@@ -219,7 +254,7 @@ fi
 
 # Check inter-machine latency if PLEX_IP is set
 if [ -n "${PLEX_IP:-}" ]; then
-    PLEX_LATENCY=$(ping -c 3 -W 2 "$PLEX_IP" 2>/dev/null | tail -1 | awk -F'/' '{print $5}')
+    PLEX_LATENCY=$(ping -c 3 -W 2 "$PLEX_IP" 2>/dev/null | tail -1 | awk -F'/' '{print $5}' || true)
     if [ -n "$PLEX_LATENCY" ]; then
         log "  Latency to Plex ($PLEX_IP): ${PLEX_LATENCY}ms avg"
     fi
@@ -308,7 +343,7 @@ if [ -n "$NAS_IP" ]; then
             mkdir -p "$1" 2>/dev/null || true
         fi
     }
-    for dir in movies tv anime anime-movies documentaries stand-up concerts music books audiobooks adult; do
+    for dir in "${CATEGORIES[@]}"; do
         _nfs_mkdir "$MEDIA_ROOT/$dir"
     done
 
@@ -442,6 +477,23 @@ EODROP
     log "NFS monitor service enabled"
 fi
 
+# --- NFS Mount Verification ---
+if [ -n "$NAS_IP" ]; then
+    if ! mountpoint -q "$MEDIA_ROOT" 2>/dev/null; then
+        err "FATAL: Media NFS mount at $MEDIA_ROOT is not active."
+        err "Containers will have empty media paths. Fix the NFS mount and re-run."
+        exit 1
+    fi
+    log "NFS media mount verified at $MEDIA_ROOT"
+
+    if [ -n "$NAS_DOWNLOADS_EXPORT" ] && ! mountpoint -q "$DOWNLOADS_ROOT" 2>/dev/null; then
+        err "FATAL: Downloads NFS mount at $DOWNLOADS_ROOT is not active."
+        err "Download clients need this path. Fix the NFS mount and re-run."
+        exit 1
+    fi
+    log "NFS downloads mount verified at $DOWNLOADS_ROOT"
+fi
+
 # ===========================================================================
 header "Phase 5: Pre-Seed Configurations"
 # ===========================================================================
@@ -456,12 +508,77 @@ else
     log "qBittorrent config already exists — skipping pre-seed"
 fi
 
-# --- Recyclarr: deploy TRaSH Guides config ---
+# --- Recyclarr: deploy TRaSH Guides config (quality-tier-aware) ---
 RECYCLARR_CONF="$APPDATA/recyclarr/config/recyclarr.yml"
 if [ ! -f "$RECYCLARR_CONF" ]; then
-    info "Deploying Recyclarr config..."
-    cp "$PROJECT_DIR/config-templates/recyclarr.yml" "$RECYCLARR_CONF"
-    log "Recyclarr config deployed"
+    info "Deploying Recyclarr config (quality tier: ${QUALITY_TIER:-hd})..."
+    TIER="${QUALITY_TIER:-hd}"
+    case "$TIER" in
+        uhd)
+            cp "$PROJECT_DIR/config-templates/recyclarr-uhd.yml" "$RECYCLARR_CONF" ;;
+        both)
+            # Merge HD + UHD: HD profiles first, append UHD profiles
+            # Both profiles exist side-by-side — user picks per title
+            cp "$PROJECT_DIR/config-templates/recyclarr-hd.yml" "$RECYCLARR_CONF"
+            # Append UHD profiles under separate instance names
+            cat >> "$RECYCLARR_CONF" <<'UHDAPPEND'
+
+  # --- UHD profiles (added by quality tier: both) ---
+  series-uhd:
+    base_url: http://sonarr:8989
+    api_key: YOUR_SONARR_API_KEY
+
+    quality_profiles:
+      - name: WEB-2160p
+        reset_unmatched_scores:
+          enabled: true
+        upgrade:
+          allowed: true
+          until_quality: WEB 2160p
+          until_score: 10000
+        min_format_score: 0
+        quality_sort: top
+        qualities:
+          - name: WEB 2160p
+            qualities:
+              - WEBDL-2160p
+              - WEBRip-2160p
+          - name: WEB 1080p
+            qualities:
+              - WEBDL-1080p
+              - WEBRip-1080p
+
+  movies-uhd:
+    base_url: http://radarr:7878
+    api_key: YOUR_RADARR_API_KEY
+
+    quality_profiles:
+      - name: UHD Bluray + WEB
+        reset_unmatched_scores:
+          enabled: true
+        upgrade:
+          allowed: true
+          until_quality: Bluray-2160p
+          until_score: 10000
+        min_format_score: 0
+        quality_sort: top
+        qualities:
+          - name: Bluray-2160p
+          - name: WEB 2160p
+            qualities:
+              - WEBDL-2160p
+              - WEBRip-2160p
+          - name: Bluray-1080p
+          - name: WEB 1080p
+            qualities:
+              - WEBDL-1080p
+              - WEBRip-1080p
+UHDAPPEND
+            ;;
+        *)
+            cp "$PROJECT_DIR/config-templates/recyclarr-hd.yml" "$RECYCLARR_CONF" ;;
+    esac
+    log "Recyclarr config deployed (tier: $TIER)"
 else
     log "Recyclarr config already exists"
 fi
@@ -473,27 +590,23 @@ if [ -f "$RECYCLARR_CONF" ]; then
     log "Recyclarr credentials substituted"
 fi
 
-# --- Stash: pre-seed config.yml to skip setup wizard ---
-STASH_CONFIG="$APPDATA/stash/config/config.yml"
-if [ ! -f "$STASH_CONFIG" ]; then
-    info "Pre-seeding Stash config..."
-    mkdir -p "$(dirname "$STASH_CONFIG")"
-    cat > "$STASH_CONFIG" << 'STASHCFG'
-stashes:
-  - path: /data
-    excludeVideo: false
-    excludeImage: false
-database: /root/.stash/stash-go.sqlite
-generated: /generated
-cache: /cache
-blobs_path: /root/.stash/blobs
-blobs_storage: FILESYSTEM
-host: 0.0.0.0
-port: 9999
-STASHCFG
-    log "Stash config pre-seeded (content path: /data, wizard skipped)"
+# --- SABnzbd: pre-seed host whitelist so *arr apps don't get 403 on first boot ---
+if is_selected svc-sabnzbd; then
+    SAB_INI="$APPDATA/sabnzbd/config/sabnzbd.ini"
+    if [ ! -f "$SAB_INI" ]; then
+        info "Pre-seeding SABnzbd host whitelist..."
+        mkdir -p "$APPDATA/sabnzbd/config"
+        HOSTNAME_VAL=$(hostname 2>/dev/null || echo "")
+        cat > "$SAB_INI" <<SABEOF
+[misc]
+host_whitelist = gluetun, sabnzbd, privateer, ${HOSTNAME_VAL}, localhost, 0.0.0.0
+SABEOF
+        log "SABnzbd config pre-seeded (host_whitelist allows Docker hostnames)"
+    else
+        log "SABnzbd config already exists — skipping pre-seed"
+    fi
 else
-    log "Stash config already exists — skipping pre-seed"
+    log "SABnzbd: skipped pre-seed (not selected)"
 fi
 
 # Set final ownership
@@ -516,6 +629,12 @@ else
 fi
 
 log "All containers starting"
+
+# ⚠ IMPORTANT: Gluetun network namespace caveat
+# qBittorrent and SABnzbd share Gluetun's network namespace (network_mode: service:gluetun).
+# If Gluetun is recreated (new container ID), qBit and SABnzbd lose their network namespace
+# and become unreachable. ALWAYS use `docker compose up -d` (recreates dependents too),
+# NEVER `docker restart gluetun` (orphans the dependents with a dead namespace).
 
 # Wait for critical services
 info "Waiting for services to initialize (this takes 30-60 seconds)..."
@@ -573,75 +692,42 @@ update_env_key() {
     fi
 }
 
-# --- Radarr ---
-LIVE_KEY=$(get_arr_api_key "Radarr" "$APPDATA/radarr/config/config.xml")
-if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${RADARR_API_KEY:-}" ]; then
-    RADARR_API_KEY="$LIVE_KEY"
-    log "Radarr API key: ${RADARR_API_KEY:0:8}..."
-    NEED_ENV_UPDATE=true
-elif [ -z "${RADARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
-    warn "Could not get Radarr API key — container may still be starting"
-fi
+# Collect keys only for selected services
+collect_key() {
+    local name="$1" profile="$2" config_path="$3" env_var="$4"
+    is_selected "$profile" || { log "  $name: skipped (not selected)"; return 0; }
+    local live_key
+    live_key=$(get_arr_api_key "$name" "$config_path")
+    local current="${!env_var:-}"
+    if [ -n "$live_key" ] && [ "$live_key" != "$current" ]; then
+        eval "$env_var='$live_key'"
+        log "  $name API key: ${live_key:0:8}..."
+        NEED_ENV_UPDATE=true
+    elif [ -z "$current" ] && [ -z "$live_key" ]; then
+        warn "  Could not get $name API key"
+    fi
+}
 
-# --- Sonarr ---
-LIVE_KEY=$(get_arr_api_key "Sonarr" "$APPDATA/sonarr/config/config.xml")
-if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${SONARR_API_KEY:-}" ]; then
-    SONARR_API_KEY="$LIVE_KEY"
-    log "Sonarr API key: ${SONARR_API_KEY:0:8}..."
-    NEED_ENV_UPDATE=true
-elif [ -z "${SONARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
-    warn "Could not get Sonarr API key — container may still be starting"
-fi
-
-# --- Lidarr ---
-LIVE_KEY=$(get_arr_api_key "Lidarr" "$APPDATA/lidarr/config/config.xml")
-if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${LIDARR_API_KEY:-}" ]; then
-    LIDARR_API_KEY="$LIVE_KEY"
-    log "Lidarr API key: ${LIDARR_API_KEY:0:8}..."
-    NEED_ENV_UPDATE=true
-elif [ -z "${LIDARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
-    warn "Could not get Lidarr API key"
-fi
-
-# --- Prowlarr ---
-LIVE_KEY=$(get_arr_api_key "Prowlarr" "$APPDATA/prowlarr/config/config.xml")
-if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${PROWLARR_API_KEY:-}" ]; then
-    PROWLARR_API_KEY="$LIVE_KEY"
-    log "Prowlarr API key: ${PROWLARR_API_KEY:0:8}..."
-    NEED_ENV_UPDATE=true
-elif [ -z "${PROWLARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
-    warn "Could not get Prowlarr API key"
-fi
+collect_key "Radarr"    svc-radarr    "$APPDATA/radarr/config/config.xml"    RADARR_API_KEY
+collect_key "Sonarr"    svc-sonarr    "$APPDATA/sonarr/config/config.xml"    SONARR_API_KEY
+collect_key "Lidarr"    svc-lidarr    "$APPDATA/lidarr/config/config.xml"    LIDARR_API_KEY
+collect_key "Prowlarr"  svc-prowlarr  "$APPDATA/prowlarr/config/config.xml"  PROWLARR_API_KEY
+collect_key "Bookshelf" svc-bookshelf "$APPDATA/bookshelf/config/config.xml" BOOKSHELF_API_KEY
+collect_key "Whisparr"  svc-whisparr  "$APPDATA/whisparr/config/config.xml"  WHISPARR_API_KEY
 
 # --- Bazarr (stores key differently) ---
-BAZARR_CONF_DB="$APPDATA/bazarr/config/config/config.yaml"
-if [ -f "$BAZARR_CONF_DB" ]; then
-    LIVE_KEY=$(grep -oP 'apikey:\s*\K[a-f0-9]+' "$BAZARR_CONF_DB" 2>/dev/null | head -1 || true)
-    if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${BAZARR_API_KEY:-}" ]; then
-        BAZARR_API_KEY="$LIVE_KEY"
-        log "Bazarr API key: ${BAZARR_API_KEY:0:8}..."
-        NEED_ENV_UPDATE=true
+if is_selected svc-bazarr; then
+    BAZARR_CONF_DB="$APPDATA/bazarr/config/config/config.yaml"
+    if [ -f "$BAZARR_CONF_DB" ]; then
+        LIVE_KEY=$(grep -oP 'apikey:\s*\K[a-f0-9]+' "$BAZARR_CONF_DB" 2>/dev/null | head -1 || true)
+        if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${BAZARR_API_KEY:-}" ]; then
+            BAZARR_API_KEY="$LIVE_KEY"
+            log "  Bazarr API key: ${BAZARR_API_KEY:0:8}..."
+            NEED_ENV_UPDATE=true
+        fi
     fi
-fi
-
-# --- Bookshelf ---
-LIVE_KEY=$(get_arr_api_key "Bookshelf" "$APPDATA/bookshelf/config/config.xml")
-if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${BOOKSHELF_API_KEY:-}" ]; then
-    BOOKSHELF_API_KEY="$LIVE_KEY"
-    log "Bookshelf API key: ${BOOKSHELF_API_KEY:0:8}..."
-    NEED_ENV_UPDATE=true
-elif [ -z "${BOOKSHELF_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
-    warn "Could not get Bookshelf API key"
-fi
-
-# --- Whisparr ---
-LIVE_KEY=$(get_arr_api_key "Whisparr" "$APPDATA/whisparr/config/config.xml")
-if [ -n "$LIVE_KEY" ] && [ "$LIVE_KEY" != "${WHISPARR_API_KEY:-}" ]; then
-    WHISPARR_API_KEY="$LIVE_KEY"
-    log "Whisparr API key: ${WHISPARR_API_KEY:0:8}..."
-    NEED_ENV_UPDATE=true
-elif [ -z "${WHISPARR_API_KEY:-}" ] && [ -z "$LIVE_KEY" ]; then
-    warn "Could not get Whisparr API key"
+else
+    log "  Bazarr: skipped (not selected)"
 fi
 
 # Auto-update .env with discovered keys (--force to handle changed keys)
@@ -701,6 +787,7 @@ wait_for_api() {
 }
 
 # --- SABnzbd: paths + categories ---
+if is_selected svc-sabnzbd; then
 if [ -n "${SABNZBD_API_KEY:-}" ]; then
     SAB_URL="http://localhost:8085"
     info "Waiting for SABnzbd API..."
@@ -722,8 +809,8 @@ if [ -n "${SABNZBD_API_KEY:-}" ]; then
         curl -sf "${SAB_URL}/api?mode=set_config&section=misc&keyword=download_dir&value=/downloads/usenet/incomplete&apikey=${SABNZBD_API_KEY}" > /dev/null 2>&1 && \
             log "  SABnzbd: incomplete dir → /downloads/usenet/incomplete" || true
 
-        # Create categories matching *arr app names
-        for cat_name in radarr sonarr lidarr bookshelf whisparr; do
+        # Create categories matching *arr app names (books = alias for bookshelf)
+        for cat_name in radarr sonarr lidarr bookshelf whisparr books; do
             curl -sf "${SAB_URL}/api?mode=set_config&section=categories&keyword=${cat_name}&name=${cat_name}&pp=&script=&dir=${cat_name}&newzbin=&priority=-100&apikey=${SABNZBD_API_KEY}" > /dev/null 2>&1 && \
                 log "  SABnzbd: category '${cat_name}' → ${cat_name}/" || true
         done
@@ -750,6 +837,16 @@ if [ -n "${SABNZBD_API_KEY:-}" ]; then
         sab_set "cleanup_list"       ".nfo,.txt,.url,.lnk,.html,.htm,.exe,.bat,.cmd,.com,.scr,.nzb,.sfv,.srr,.info,.db,.DS_Store"
         log "  SABnzbd: performance settings applied"
 
+        # Apply download speed limit
+        SPEED_LIMIT="${DOWNLOAD_SPEED_LIMIT:-0}"
+        if [ "$SPEED_LIMIT" != "0" ] && [ -n "$SPEED_LIMIT" ]; then
+            SAB_KEY=$(docker exec sabnzbd cat /config/sabnzbd.ini 2>/dev/null | grep -oP '^api_key\s*=\s*\K\S+' | head -1 || true)
+            if [ -n "$SAB_KEY" ]; then
+                curl -sf "${SAB_URL}/api?mode=set_config&section=misc&keyword=bandwidth_max&value=${SPEED_LIMIT}M&apikey=${SAB_KEY}&output=json" > /dev/null 2>&1 && \
+                    log "  SABnzbd speed limit: ${SPEED_LIMIT} MB/s" || true
+            fi
+        fi
+
         # Restart SABnzbd to apply all changes
         curl -sf "${SAB_URL}/api?mode=restart&apikey=${SABNZBD_API_KEY}" > /dev/null 2>&1 || true
         sleep 5
@@ -758,14 +855,20 @@ if [ -n "${SABNZBD_API_KEY:-}" ]; then
         warn "SABnzbd API not ready — categories must be configured manually"
     fi
 fi
+else
+    log "SABnzbd: skipped (not selected)"
+fi
 
 # --- RADARR ---
+if is_selected svc-radarr; then
 if [ -n "${RADARR_API_KEY:-}" ]; then
     info "Configuring Radarr..."
     if wait_for_api "Radarr" "http://${ARR_HOST}:7878/api/v3/system/status?apikey=${RADARR_API_KEY}"; then
 
         # Root folders
-        for folder in movies documentaries stand-up concerts anime-movies; do
+        # Radarr root folders: movie-type categories only
+        for folder in "${CATEGORIES[@]}"; do
+            case "$folder" in movies|documentaries|stand-up|concerts|anime-movies) ;; *) continue ;; esac
             existing=$(arr_api "http://${ARR_HOST}:7878/api/v3/rootfolder" "$RADARR_API_KEY" | grep -c "/${folder}" || true)
             if [ "$existing" -eq 0 ]; then
                 arr_api "http://${ARR_HOST}:7878/api/v3/rootfolder" "$RADARR_API_KEY" POST \
@@ -775,6 +878,7 @@ if [ -n "${RADARR_API_KEY:-}" ]; then
         done
 
         # Download client: qBittorrent
+        if is_selected svc-qbittorrent; then
         existing_dc=$(arr_api "http://${ARR_HOST}:7878/api/v3/downloadclient" "$RADARR_API_KEY" | grep -c "qBittorrent" || true)
         if [ "$existing_dc" -eq 0 ]; then
             arr_api "http://${ARR_HOST}:7878/api/v3/downloadclient" "$RADARR_API_KEY" POST "{
@@ -791,8 +895,10 @@ if [ -n "${RADARR_API_KEY:-}" ]; then
                 \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
             }" > /dev/null && log "  Download client: qBittorrent" || warn "  Could not add qBittorrent"
         fi
+        fi
 
         # Download client: SABnzbd (if key provided)
+        if is_selected svc-sabnzbd; then
         if [ -n "${SABNZBD_API_KEY:-}" ]; then
             existing_sab=$(arr_api "http://${ARR_HOST}:7878/api/v3/downloadclient" "$RADARR_API_KEY" | grep -c "SABnzbd" || true)
             if [ "$existing_sab" -eq 0 ]; then
@@ -810,6 +916,7 @@ if [ -n "${RADARR_API_KEY:-}" ]; then
                 }" > /dev/null && log "  Download client: SABnzbd" || warn "  Could not add SABnzbd"
             fi
         fi
+        fi
 
         # Naming convention
         arr_api "http://${ARR_HOST}:7878/api/v3/config/naming" "$RADARR_API_KEY" PUT '{
@@ -821,13 +928,19 @@ if [ -n "${RADARR_API_KEY:-}" ]; then
         log "Radarr configured"
     fi
 fi
+else
+    log "Radarr: skipped (not selected)"
+fi
 
 # --- SONARR ---
+if is_selected svc-sonarr; then
 if [ -n "${SONARR_API_KEY:-}" ]; then
     info "Configuring Sonarr..."
     if wait_for_api "Sonarr" "http://${ARR_HOST}:8989/api/v3/system/status?apikey=${SONARR_API_KEY}"; then
 
-        for folder in tv anime; do
+        # Sonarr root folders: series-type categories only
+        for folder in "${CATEGORIES[@]}"; do
+            case "$folder" in tv|anime) ;; *) continue ;; esac
             existing=$(arr_api "http://${ARR_HOST}:8989/api/v3/rootfolder" "$SONARR_API_KEY" | grep -c "/${folder}" || true)
             if [ "$existing" -eq 0 ]; then
                 arr_api "http://${ARR_HOST}:8989/api/v3/rootfolder" "$SONARR_API_KEY" POST \
@@ -836,6 +949,7 @@ if [ -n "${SONARR_API_KEY:-}" ]; then
             fi
         done
 
+        if is_selected svc-qbittorrent; then
         existing_dc=$(arr_api "http://${ARR_HOST}:8989/api/v3/downloadclient" "$SONARR_API_KEY" | grep -c "qBittorrent" || true)
         if [ "$existing_dc" -eq 0 ]; then
             arr_api "http://${ARR_HOST}:8989/api/v3/downloadclient" "$SONARR_API_KEY" POST "{
@@ -852,7 +966,9 @@ if [ -n "${SONARR_API_KEY:-}" ]; then
                 \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
             }" > /dev/null && log "  Download client: qBittorrent" || true
         fi
+        fi
 
+        if is_selected svc-sabnzbd; then
         if [ -n "${SABNZBD_API_KEY:-}" ]; then
             existing_sab=$(arr_api "http://${ARR_HOST}:8989/api/v3/downloadclient" "$SONARR_API_KEY" | grep -c "SABnzbd" || true)
             if [ "$existing_sab" -eq 0 ]; then
@@ -870,6 +986,7 @@ if [ -n "${SONARR_API_KEY:-}" ]; then
                 }" > /dev/null && log "  Download client: SABnzbd" || true
             fi
         fi
+        fi
 
         arr_api "http://${ARR_HOST}:8989/api/v3/config/naming" "$SONARR_API_KEY" PUT '{
             "renameEpisodes": true, "replaceIllegalCharacters": true,
@@ -881,18 +998,25 @@ if [ -n "${SONARR_API_KEY:-}" ]; then
         log "Sonarr configured"
     fi
 fi
+else
+    log "Sonarr: skipped (not selected)"
+fi
 
 # --- LIDARR ---
+if is_selected svc-lidarr; then
 if [ -n "${LIDARR_API_KEY:-}" ]; then
     info "Configuring Lidarr..."
     if wait_for_api "Lidarr" "http://${ARR_HOST}:8686/api/v1/system/status?apikey=${LIDARR_API_KEY}"; then
 
+        if has_category music; then
         existing=$(arr_api "http://${ARR_HOST}:8686/api/v1/rootfolder" "$LIDARR_API_KEY" | grep -c "/music" || true)
         if [ "$existing" -eq 0 ]; then
             arr_api "http://${ARR_HOST}:8686/api/v1/rootfolder" "$LIDARR_API_KEY" POST \
                 '{"path": "/music", "accessible": true}' > /dev/null && log "  Root folder: /music" || true
         fi
+        fi
 
+        if is_selected svc-qbittorrent; then
         existing_dc=$(arr_api "http://${ARR_HOST}:8686/api/v1/downloadclient" "$LIDARR_API_KEY" | grep -c "qBittorrent" || true)
         if [ "$existing_dc" -eq 0 ]; then
             arr_api "http://${ARR_HOST}:8686/api/v1/downloadclient" "$LIDARR_API_KEY" POST "{
@@ -909,7 +1033,9 @@ if [ -n "${LIDARR_API_KEY:-}" ]; then
                 \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
             }" > /dev/null && log "  Download client: qBittorrent" || true
         fi
+        fi
 
+        if is_selected svc-sabnzbd; then
         if [ -n "${SABNZBD_API_KEY:-}" ]; then
             existing_sab=$(arr_api "http://${ARR_HOST}:8686/api/v1/downloadclient" "$LIDARR_API_KEY" | grep -c "SABnzbd" || true)
             if [ "$existing_sab" -eq 0 ]; then
@@ -927,12 +1053,17 @@ if [ -n "${LIDARR_API_KEY:-}" ]; then
                 }" > /dev/null && log "  Download client: SABnzbd" || true
             fi
         fi
+        fi
 
         log "Lidarr configured"
     fi
 fi
+else
+    log "Lidarr: skipped (not selected)"
+fi
 
 # --- PROWLARR → *ARR CONNECTIONS ---
+if is_selected svc-prowlarr; then
 if [ -n "${PROWLARR_API_KEY:-}" ]; then
     info "Configuring Prowlarr connections..."
     if wait_for_api "Prowlarr" "http://${ARR_HOST}:9696/api/v1/system/status?apikey=${PROWLARR_API_KEY}"; then
@@ -1049,10 +1180,11 @@ if [ -n "${PROWLARR_API_KEY:-}" ]; then
             IDX_ADDED=0
             IDX_SKIPPED=0
             IDX_FAILED=0
-            IDX_COUNT=$(jq 'length' "$INDEXER_SEED")
+            IDX_COUNT=$(jq 'length' "$INDEXER_SEED" 2>/dev/null || echo "0")
 
             for i in $(seq 0 $((IDX_COUNT - 1))); do
-                IDX_NAME=$(jq -r ".[$i].name" "$INDEXER_SEED")
+                IDX_NAME=$(jq -r ".[$i].name" "$INDEXER_SEED" 2>/dev/null || echo "")
+                [ -z "$IDX_NAME" ] && { IDX_FAILED=$((IDX_FAILED + 1)); continue; }
 
                 # Skip if already exists
                 if echo "$EXISTING_INDEXERS" | grep -qxF "$IDX_NAME"; then
@@ -1061,13 +1193,14 @@ if [ -n "${PROWLARR_API_KEY:-}" ]; then
                 fi
 
                 # Build payload — substitute env vars and remap FlareSolverr tag IDs
-                PAYLOAD=$(jq ".[$i]" "$INDEXER_SEED")
+                PAYLOAD=$(jq ".[$i]" "$INDEXER_SEED" 2>/dev/null || echo "")
+                [ -z "$PAYLOAD" ] && { IDX_FAILED=$((IDX_FAILED + 1)); continue; }
 
                 # Substitute NZBgeek API key from env
                 if echo "$PAYLOAD" | jq -e '.fields[] | select(.value=="__NZBGEEK_API_KEY__")' > /dev/null 2>&1; then
                     if [ -n "${NZBGEEK_API_KEY:-}" ]; then
                         PAYLOAD=$(echo "$PAYLOAD" | jq --arg key "$NZBGEEK_API_KEY" \
-                            '(.fields[] | select(.name=="apiKey")).value = $key' 2>/dev/null)
+                            '(.fields[] | select(.name=="apiKey")).value = $key' 2>/dev/null || echo "$PAYLOAD")
                     else
                         warn "  Skipping NZBgeek — NZBGEEK_API_KEY not set"
                         IDX_FAILED=$((IDX_FAILED + 1))
@@ -1078,14 +1211,13 @@ if [ -n "${PROWLARR_API_KEY:-}" ]; then
                 # Remap FlareSolverr tag: seed uses [1] but fresh Prowlarr assigns new IDs
                 if echo "$PAYLOAD" | jq -e '.tags | length > 0' > /dev/null 2>&1; then
                     if [ -n "$FLARE_TAG_ID" ]; then
-                        PAYLOAD=$(echo "$PAYLOAD" | jq --argjson tid "$FLARE_TAG_ID" '.tags = [$tid]' 2>/dev/null)
+                        PAYLOAD=$(echo "$PAYLOAD" | jq --argjson tid "$FLARE_TAG_ID" '.tags = [$tid]' 2>/dev/null || echo "$PAYLOAD")
                     else
-                        PAYLOAD=$(echo "$PAYLOAD" | jq '.tags = []' 2>/dev/null)
+                        PAYLOAD=$(echo "$PAYLOAD" | jq '.tags = []' 2>/dev/null || echo "$PAYLOAD")
                     fi
                 fi
 
-                arr_api "http://${ARR_HOST}:9696/api/v1/indexer" "$PROWLARR_API_KEY" POST "$PAYLOAD" > /dev/null 2>&1
-                if [ $? -eq 0 ]; then
+                if arr_api "http://${ARR_HOST}:9696/api/v1/indexer" "$PROWLARR_API_KEY" POST "$PAYLOAD" > /dev/null 2>&1; then
                     IDX_ADDED=$((IDX_ADDED + 1))
                 else
                     IDX_FAILED=$((IDX_FAILED + 1))
@@ -1106,13 +1238,20 @@ if [ -n "${PROWLARR_API_KEY:-}" ]; then
         log "Prowlarr configured"
     fi
 fi
+else
+    log "Prowlarr: skipped (not selected)"
+fi
 
 # --- RECYCLARR SYNC ---
+if is_selected svc-recyclarr; then
 info "Syncing Recyclarr quality profiles..."
 sleep 5
 docker exec recyclarr recyclarr sync 2>/dev/null && \
     log "Recyclarr: TRaSH Guide profiles synced" || \
     warn "Recyclarr: Sync failed — may need API keys in config. Re-run after updating."
+else
+    log "Recyclarr: skipped (not selected)"
+fi
 
 # ===========================================================================
 header "Phase 8b: Bookshelf, Whisparr, Bazarr & qBit Password"
@@ -1126,6 +1265,7 @@ set -a; source "$PROJECT_DIR/.env"; set +a
 # qBit runs behind Gluetun VPN — must wait for VPN to connect first
 QBIT_PASS="${QBIT_PASSWORD:-adminadmin}"
 QBIT_COOKIE=""
+if is_selected svc-qbittorrent; then
 if [ "$QBIT_PASS" != "adminadmin" ]; then
     info "Waiting for qBittorrent API (depends on VPN tunnel)..."
     QBIT_READY=false
@@ -1206,13 +1346,28 @@ elif [ "$QBIT_PASS" = "adminadmin" ]; then
     fi
 fi
 
+# --- qBittorrent: download speed limit ---
+if [ -n "$QBIT_COOKIE" ]; then
+    SPEED_LIMIT="${DOWNLOAD_SPEED_LIMIT:-0}"
+    if [ "$SPEED_LIMIT" != "0" ] && [ -n "$SPEED_LIMIT" ]; then
+        SPEED_BYTES=$(( SPEED_LIMIT * 1024 * 1024 ))
+        curl -sf "http://localhost:8080/api/v2/transfer/setDownloadLimit" -d "limit=${SPEED_BYTES}" > /dev/null 2>&1 && \
+            log "  Download speed limit: ${SPEED_LIMIT} MB/s" || true
+    fi
+fi
+else
+    log "qBittorrent: skipped (not selected)"
+fi
+
 # --- BOOKSHELF: root folders + download client ---
+if is_selected svc-bookshelf; then
 if [ -n "${BOOKSHELF_API_KEY:-}" ]; then
     info "Configuring Bookshelf..."
     if wait_for_api "Bookshelf" "http://${ARR_HOST}:8787/api/v1/system/status?apikey=${BOOKSHELF_API_KEY}"; then
 
         for folder_info in "books:Books" "audiobooks:Audiobooks"; do
             IFS=":" read -r folder fname <<< "$folder_info"
+            has_category "$folder" || continue
             existing=$(arr_api "http://${ARR_HOST}:8787/api/v1/rootfolder" "$BOOKSHELF_API_KEY" | grep -c "/${folder}" || true)
             if [ "$existing" -eq 0 ]; then
                 arr_api "http://${ARR_HOST}:8787/api/v1/rootfolder" "$BOOKSHELF_API_KEY" POST \
@@ -1221,6 +1376,7 @@ if [ -n "${BOOKSHELF_API_KEY:-}" ]; then
             fi
         done
 
+        if is_selected svc-qbittorrent; then
         existing_dc=$(arr_api "http://${ARR_HOST}:8787/api/v1/downloadclient" "$BOOKSHELF_API_KEY" | grep -c "qBittorrent" || true)
         if [ "$existing_dc" -eq 0 ]; then
             arr_api "http://${ARR_HOST}:8787/api/v1/downloadclient" "$BOOKSHELF_API_KEY" POST "{
@@ -1237,7 +1393,9 @@ if [ -n "${BOOKSHELF_API_KEY:-}" ]; then
                 \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
             }" > /dev/null 2>&1 && log "  Bookshelf: download client (qBit)" || true
         fi
+        fi
 
+        if is_selected svc-sabnzbd; then
         if [ -n "${SABNZBD_API_KEY:-}" ]; then
             existing_sab=$(arr_api "http://${ARR_HOST}:8787/api/v1/downloadclient" "$BOOKSHELF_API_KEY" | grep -c "SABnzbd" || true)
             if [ "$existing_sab" -eq 0 ]; then
@@ -1255,23 +1413,31 @@ if [ -n "${BOOKSHELF_API_KEY:-}" ]; then
                 }" > /dev/null 2>&1 && log "  Bookshelf: download client (SABnzbd)" || true
             fi
         fi
+        fi
 
         log "Bookshelf configured"
     fi
 fi
+else
+    log "Bookshelf: skipped (not selected)"
+fi
 
 # --- WHISPARR: root folder + download client ---
+if is_selected svc-whisparr; then
 if [ -n "${WHISPARR_API_KEY:-}" ]; then
     info "Configuring Whisparr..."
     if wait_for_api "Whisparr" "http://${ARR_HOST}:6969/api/v3/system/status?apikey=${WHISPARR_API_KEY}"; then
 
+        if has_category adult; then
         existing=$(arr_api "http://${ARR_HOST}:6969/api/v3/rootfolder" "$WHISPARR_API_KEY" | grep -c "/adult" || true)
         if [ "$existing" -eq 0 ]; then
             arr_api "http://${ARR_HOST}:6969/api/v3/rootfolder" "$WHISPARR_API_KEY" POST \
                 "{\"path\": \"/adult\", \"accessible\": true}" > /dev/null 2>&1 && \
                 log "  Whisparr: root folder /adult" || true
         fi
+        fi
 
+        if is_selected svc-qbittorrent; then
         existing_dc=$(arr_api "http://${ARR_HOST}:6969/api/v3/downloadclient" "$WHISPARR_API_KEY" | grep -c "qBittorrent" || true)
         if [ "$existing_dc" -eq 0 ]; then
             arr_api "http://${ARR_HOST}:6969/api/v3/downloadclient" "$WHISPARR_API_KEY" POST "{
@@ -1288,7 +1454,9 @@ if [ -n "${WHISPARR_API_KEY:-}" ]; then
                 \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
             }" > /dev/null 2>&1 && log "  Whisparr: download client (qBit)" || true
         fi
+        fi
 
+        if is_selected svc-sabnzbd; then
         if [ -n "${SABNZBD_API_KEY:-}" ]; then
             existing_sab=$(arr_api "http://${ARR_HOST}:6969/api/v3/downloadclient" "$WHISPARR_API_KEY" | grep -c "SABnzbd" || true)
             if [ "$existing_sab" -eq 0 ]; then
@@ -1305,6 +1473,7 @@ if [ -n "${WHISPARR_API_KEY:-}" ]; then
                     \"removeCompletedDownloads\": true, \"removeFailedDownloads\": true
                 }" > /dev/null 2>&1 && log "  Whisparr: download client (SABnzbd)" || true
             fi
+        fi
         fi
 
         # --- Whisparr Indexer Workaround ---
@@ -1345,8 +1514,12 @@ if [ -n "${WHISPARR_API_KEY:-}" ]; then
         log "Whisparr configured"
     fi
 fi
+else
+    log "Whisparr: skipped (not selected)"
+fi
 
 # --- BAZARR: Full configuration — arr connections, providers, language profiles ---
+if is_selected svc-bazarr; then
 if [ -n "${BAZARR_API_KEY:-}" ]; then
     info "Configuring Bazarr..."
     sleep 5  # Bazarr is slow to init
@@ -1478,6 +1651,9 @@ if [ -n "${BAZARR_API_KEY:-}" ]; then
 else
     warn "Bazarr: no API key yet — configure manually after first start"
 fi
+else
+    log "Bazarr: skipped (not selected)"
+fi
 
 # --- AUTOBRR: onboard + download clients ---
 info "Configuring Autobrr..."
@@ -1588,6 +1764,7 @@ fi
 
 # --- Notifiarr: write API key to config file (not env var) ---
 # Empty DN_API_KEY env var was overriding config file. Now we write directly to config.
+if is_selected svc-notifiarr; then
 if [ -n "${NOTIFIARR_API_KEY:-}" ]; then
     NOTIFIARR_CONF="$APPDATA/notifiarr/config/notifiarr.conf"
     if [ -f "$NOTIFIARR_CONF" ]; then
@@ -1615,6 +1792,9 @@ NEOF
     else
         docker compose up -d notifiarr 2>/dev/null || true
     fi
+fi
+else
+    log "Notifiarr: skipped (not selected)"
 fi
 
 # --- Update download client passwords across all *arr apps ---
@@ -1659,10 +1839,10 @@ enable_auto_redownload() {
     if [ -z "$api_key" ]; then return; fi
     local url="http://${host}:${port}/api/${api_ver}/config/downloadclient"
     local config
-    config=$(arr_api "$url" "$api_key" 2>/dev/null)
+    config=$(arr_api "$url" "$api_key" 2>/dev/null || echo "")
     if [ -n "$config" ] && [ "$config" != "null" ]; then
         local updated
-        updated=$(echo "$config" | jq '.autoRedownloadFailed = true' 2>/dev/null)
+        updated=$(echo "$config" | jq '.autoRedownloadFailed = true' 2>/dev/null || echo "")
         if [ -n "$updated" ]; then
             arr_api "$url" "$api_key" PUT "$updated" > /dev/null 2>&1 && \
                 log "  ${name}: auto-redownload on failure enabled" || true
@@ -1671,11 +1851,11 @@ enable_auto_redownload() {
 }
 
 info "Enabling auto-redownload on failure..."
-enable_auto_redownload "Radarr"  "$ARR_HOST" 7878 "v3" "${RADARR_API_KEY:-}"
-enable_auto_redownload "Sonarr"  "$ARR_HOST" 8989 "v3" "${SONARR_API_KEY:-}"
-enable_auto_redownload "Lidarr"  "$ARR_HOST" 8686 "v1" "${LIDARR_API_KEY:-}"
-enable_auto_redownload "Bookshelf" "$ARR_HOST" 8787 "v1" "${BOOKSHELF_API_KEY:-}"
-enable_auto_redownload "Whisparr" "$ARR_HOST" 6969 "v3" "${WHISPARR_API_KEY:-}"
+is_selected svc-radarr && enable_auto_redownload "Radarr"  "$ARR_HOST" 7878 "v3" "${RADARR_API_KEY:-}"
+is_selected svc-sonarr && enable_auto_redownload "Sonarr"  "$ARR_HOST" 8989 "v3" "${SONARR_API_KEY:-}"
+is_selected svc-lidarr && enable_auto_redownload "Lidarr"  "$ARR_HOST" 8686 "v1" "${LIDARR_API_KEY:-}"
+is_selected svc-bookshelf && enable_auto_redownload "Bookshelf" "$ARR_HOST" 8787 "v1" "${BOOKSHELF_API_KEY:-}"
+is_selected svc-whisparr && enable_auto_redownload "Whisparr" "$ARR_HOST" 6969 "v3" "${WHISPARR_API_KEY:-}"
 
 # --- Discord notifications for all *arr apps ---
 if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
@@ -1715,11 +1895,11 @@ if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
             warn "  ${name}: could not add Discord notification"
     }
 
-    add_discord_notification "Radarr"   "$ARR_HOST" 7878 "v3" "${RADARR_API_KEY:-}"   "Radarr"
-    add_discord_notification "Sonarr"   "$ARR_HOST" 8989 "v3" "${SONARR_API_KEY:-}"   "Sonarr"
-    add_discord_notification "Lidarr"   "$ARR_HOST" 8686 "v1" "${LIDARR_API_KEY:-}"   "Lidarr"
-    add_discord_notification "Bookshelf" "$ARR_HOST" 8787 "v1" "${BOOKSHELF_API_KEY:-}" "Bookshelf"
-    add_discord_notification "Prowlarr" "$ARR_HOST" 9696 "v1" "${PROWLARR_API_KEY:-}" "Prowlarr"
+    is_selected svc-radarr && add_discord_notification "Radarr"   "$ARR_HOST" 7878 "v3" "${RADARR_API_KEY:-}"   "Radarr"
+    is_selected svc-sonarr && add_discord_notification "Sonarr"   "$ARR_HOST" 8989 "v3" "${SONARR_API_KEY:-}"   "Sonarr"
+    is_selected svc-lidarr && add_discord_notification "Lidarr"   "$ARR_HOST" 8686 "v1" "${LIDARR_API_KEY:-}"   "Lidarr"
+    is_selected svc-bookshelf && add_discord_notification "Bookshelf" "$ARR_HOST" 8787 "v1" "${BOOKSHELF_API_KEY:-}" "Bookshelf"
+    is_selected svc-prowlarr && add_discord_notification "Prowlarr" "$ARR_HOST" 9696 "v1" "${PROWLARR_API_KEY:-}" "Prowlarr"
 fi
 
 # ===========================================================================
@@ -1761,45 +1941,100 @@ add_import_list() {
 }
 
 # --- Radarr import lists ---
+if is_selected svc-radarr; then
 if [ -n "${RADARR_API_KEY:-}" ]; then
     info "Adding Radarr import lists..."
 
-    if [ -n "${TRAKT_ACCESS_TOKEN:-}" ]; then
+    # Trakt Popular + Trending (requires IMPORT_TRAKT=true + Trakt token)
+    if [ "${IMPORT_TRAKT:-false}" = "true" ] && [ -n "${TRAKT_ACCESS_TOKEN:-}" ]; then
         add_import_list "Radarr" "$ARR_HOST" 7878 "v3" "$RADARR_API_KEY" \
             "Trakt Popular" "TraktPopularImport" "TraktPopularSettings" "/movies" \
             "[{\"name\":\"accessToken\",\"value\":\"${TRAKT_ACCESS_TOKEN}\"},{\"name\":\"limit\",\"value\":100},{\"name\":\"traktListType\",\"value\":0}]"
-
         add_import_list "Radarr" "$ARR_HOST" 7878 "v3" "$RADARR_API_KEY" \
             "Trakt Trending" "TraktPopularImport" "TraktPopularSettings" "/movies" \
             "[{\"name\":\"accessToken\",\"value\":\"${TRAKT_ACCESS_TOKEN}\"},{\"name\":\"limit\",\"value\":50},{\"name\":\"traktListType\",\"value\":1}]"
     fi
 
-    if [ -n "${TMDB_API_KEY:-}" ]; then
+    # TMDb Popular (requires IMPORT_TMDB=true + TMDb key)
+    if [ "${IMPORT_TMDB:-true}" = "true" ] && [ -n "${TMDB_API_KEY:-}" ]; then
         add_import_list "Radarr" "$ARR_HOST" 7878 "v3" "$RADARR_API_KEY" \
             "TMDb Popular" "TMDbPopularImport" "TMDbPopularSettings" "/movies" \
             "[{\"name\":\"tmdbCertification\",\"value\":\"\"},{\"name\":\"includeGenreIds\",\"value\":\"\"},{\"name\":\"excludeGenreIds\",\"value\":\"\"},{\"name\":\"languageCode\",\"value\":0}]"
     fi
+
+    # StevenLu Popular (no API key needed — Radarr only)
+    if [ "${IMPORT_STEVENLU:-true}" = "true" ]; then
+        add_import_list "Radarr" "$ARR_HOST" 7878 "v3" "$RADARR_API_KEY" \
+            "StevenLu Popular" "StevenLuImport" "StevenLuSettings" "/movies" \
+            "[{\"name\":\"source\",\"value\":0}]"
+    fi
+
+    # IMDb List (requires IMPORT_IMDB=true + list ID)
+    if [ "${IMPORT_IMDB:-false}" = "true" ] && [ -n "${IMDB_LIST_ID:-}" ]; then
+        add_import_list "Radarr" "$ARR_HOST" 7878 "v3" "$RADARR_API_KEY" \
+            "IMDb List" "IMDbListImport" "IMDbListSettings" "/movies" \
+            "[{\"name\":\"listId\",\"value\":\"${IMDB_LIST_ID}\"}]"
+    fi
+
+    # MDBList custom lists
+    if [ "${IMPORT_MDBLIST:-false}" = "true" ] && [ -n "${MDBLIST_API_KEY:-}" ] && [ -n "${MDBLIST_LISTS:-}" ]; then
+        IFS=',' read -ra MDBLIST_IDS <<< "$MDBLIST_LISTS"
+        for list_id in "${MDBLIST_IDS[@]}"; do
+            list_id=$(echo "$list_id" | tr -d ' ')
+            [ -z "$list_id" ] && continue
+            add_import_list "Radarr" "$ARR_HOST" 7878 "v3" "$RADARR_API_KEY" \
+                "MDBList ${list_id}" "MdbListImport" "MdbListSettings" "/movies" \
+                "[{\"name\":\"apiKey\",\"value\":\"${MDBLIST_API_KEY}\"},{\"name\":\"listId\",\"value\":\"${list_id}\"}]"
+        done
+    fi
+fi
+else
+    log "Radarr import lists: skipped (not selected)"
 fi
 
 # --- Sonarr import lists ---
+if is_selected svc-sonarr; then
 if [ -n "${SONARR_API_KEY:-}" ]; then
     info "Adding Sonarr import lists..."
 
-    if [ -n "${TRAKT_ACCESS_TOKEN:-}" ]; then
+    # Trakt Popular + Trending
+    if [ "${IMPORT_TRAKT:-false}" = "true" ] && [ -n "${TRAKT_ACCESS_TOKEN:-}" ]; then
         add_import_list "Sonarr" "$ARR_HOST" 8989 "v3" "$SONARR_API_KEY" \
             "Trakt Popular" "TraktPopularImport" "TraktPopularSettings" "/tv" \
             "[{\"name\":\"accessToken\",\"value\":\"${TRAKT_ACCESS_TOKEN}\"},{\"name\":\"limit\",\"value\":100},{\"name\":\"traktListType\",\"value\":0}]"
-
         add_import_list "Sonarr" "$ARR_HOST" 8989 "v3" "$SONARR_API_KEY" \
             "Trakt Trending" "TraktPopularImport" "TraktPopularSettings" "/tv" \
             "[{\"name\":\"accessToken\",\"value\":\"${TRAKT_ACCESS_TOKEN}\"},{\"name\":\"limit\",\"value\":50},{\"name\":\"traktListType\",\"value\":1}]"
     fi
 
-    if [ -n "${TMDB_API_KEY:-}" ]; then
+    # TMDb Popular
+    if [ "${IMPORT_TMDB:-true}" = "true" ] && [ -n "${TMDB_API_KEY:-}" ]; then
         add_import_list "Sonarr" "$ARR_HOST" 8989 "v3" "$SONARR_API_KEY" \
             "TMDb Popular" "TMDbPopularImport" "TMDbPopularSettings" "/tv" \
             "[{\"name\":\"languageCode\",\"value\":0}]"
     fi
+
+    # IMDb List (Sonarr supports it too)
+    if [ "${IMPORT_IMDB:-false}" = "true" ] && [ -n "${IMDB_LIST_ID:-}" ]; then
+        add_import_list "Sonarr" "$ARR_HOST" 8989 "v3" "$SONARR_API_KEY" \
+            "IMDb List" "IMDbListImport" "IMDbListSettings" "/tv" \
+            "[{\"name\":\"listId\",\"value\":\"${IMDB_LIST_ID}\"}]"
+    fi
+
+    # MDBList custom lists
+    if [ "${IMPORT_MDBLIST:-false}" = "true" ] && [ -n "${MDBLIST_API_KEY:-}" ] && [ -n "${MDBLIST_LISTS:-}" ]; then
+        IFS=',' read -ra MDBLIST_IDS <<< "$MDBLIST_LISTS"
+        for list_id in "${MDBLIST_IDS[@]}"; do
+            list_id=$(echo "$list_id" | tr -d ' ')
+            [ -z "$list_id" ] && continue
+            add_import_list "Sonarr" "$ARR_HOST" 8989 "v3" "$SONARR_API_KEY" \
+                "MDBList ${list_id}" "MdbListImport" "MdbListSettings" "/tv" \
+                "[{\"name\":\"apiKey\",\"value\":\"${MDBLIST_API_KEY}\"},{\"name\":\"listId\",\"value\":\"${list_id}\"}]"
+        done
+    fi
+fi
+else
+    log "Sonarr import lists: skipped (not selected)"
 fi
 
 # --- Plex library scan notifications ---
@@ -1847,6 +2082,7 @@ fi
 header "Phase 8e: Immich DB Backup Cron"
 # ===========================================================================
 
+if is_selected svc-immich; then
 info "Setting up nightly Immich database backup..."
 CRON_DUMP="0 3 * * * docker exec immich-db pg_dump -U immich immich | gzip > ${MEDIA_ROOT}/backups/immich-db-\$(date +\\%Y\\%m\\%d).sql.gz"
 CRON_PRUNE="5 3 * * * find ${MEDIA_ROOT}/backups/ -name \"immich-db-*.sql.gz\" -mtime +7 -delete"
@@ -1859,12 +2095,16 @@ else
     (echo "$EXISTING_CRON"; echo "$CRON_DUMP"; echo "$CRON_PRUNE") | crontab -
     log "Immich backup cron installed (nightly at 3 AM, 7-day retention)"
 fi
+else
+    log "Immich DB backup cron: skipped (not selected)"
+fi
 
 # ===========================================================================
-header "Phase 8f: Audiobookshelf & Stash Setup"
+header "Phase 8f: Audiobookshelf Setup"
 # ===========================================================================
 
 # --- Audiobookshelf: create admin user + libraries via API ---
+if is_selected svc-audiobookshelf; then
 ABS_URL="http://localhost:13378"
 ABS_READY=false
 info "Waiting for Audiobookshelf..."
@@ -1924,40 +2164,98 @@ if [ "$ABS_READY" = true ]; then
 else
     warn "Audiobookshelf not ready — skipping auto-config"
 fi
-
-# --- Stash: trigger initial scan ---
-STASH_URL="http://localhost:9999"
-STASH_READY=false
-info "Waiting for Stash..."
-for attempt in $(seq 1 20); do
-    STASH_STATUS=$(curl -sf -X POST "$STASH_URL/graphql" \
-        -H "Content-Type: application/json" \
-        -d '{"query":"{ systemStatus { status } }"}' 2>/dev/null | jq -r '.data.systemStatus.status // empty' 2>/dev/null || echo "")
-    if [ "$STASH_STATUS" = "OK" ]; then
-        STASH_READY=true; break
-    elif [ "$STASH_STATUS" = "SETUP" ]; then
-        # Config seed didn't take — run setup via API
-        info "Running Stash setup via API..."
-        curl -sf -X POST "$STASH_URL/graphql" \
-            -H "Content-Type: application/json" \
-            -d '{"query":"mutation { setup(input: { stashes: [{path: \"/data\", excludeVideo: false, excludeImage: false}], databaseFile: \"\", generatedLocation: \"\", cacheLocation: \"\", storeBlobsInDatabase: false, blobsLocation: \"\", configLocation: \"\" }) }"}' > /dev/null 2>&1 \
-            && log "Stash setup completed via API" \
-            || warn "Stash API setup failed"
-        STASH_READY=true; break
-    fi
-    sleep 2
-done
-
-if [ "$STASH_READY" = true ]; then
-    info "Triggering Stash content scan..."
-    curl -sf -X POST "$STASH_URL/graphql" \
-        -H "Content-Type: application/json" \
-        -d '{"query":"mutation { metadataScan(input: { paths: [\"/data\"] }) }"}' > /dev/null 2>&1 \
-        && log "Stash scan triggered for /data" \
-        || warn "Stash scan trigger failed"
 else
-    warn "Stash not ready — skipping auto-config"
+    log "Audiobookshelf: skipped (not selected)"
 fi
+
+
+# ===========================================================================
+header "Phase 8g: System Crons & Monitoring"
+# ===========================================================================
+# Operational crons that keep the stack healthy between human sessions.
+# All scripts live in /opt/suparr/scripts/ (synced during deploy).
+# API keys are extracted from running containers at runtime — never baked
+# into cron entries. Webhook URL is read from .env by each script.
+#
+# This phase is idempotent: each entry is checked before adding.
+# Re-running the init script will not duplicate cron entries.
+# ===========================================================================
+
+info "Installing system cron jobs..."
+mkdir -p /var/log
+
+SUPARR_SCRIPTS="/opt/suparr/scripts"
+EXISTING_CRON=$(crontab -l 2>/dev/null || echo "")
+
+# Helper: add a cron entry if not already present (match on script name)
+add_cron() {
+    local MARKER="$1"   # unique string to grep for (script basename)
+    local ENTRY="$2"    # full cron line
+    local DESC="$3"     # human description for log
+    if echo "$EXISTING_CRON" | grep -qF "$MARKER"; then
+        log "  $DESC — already installed"
+    else
+        EXISTING_CRON="${EXISTING_CRON}
+${ENTRY}"
+        log "  $DESC — installed"
+    fi
+}
+
+# --- Disk guard: pause downloads when NVMe free space is low ---
+add_cron "disk_guard.sh" \
+    "*/15 * * * * ${SUPARR_SCRIPTS}/disk_guard.sh" \
+    "Disk guard (every 15 min)"
+
+# --- Arr health monitor: check all services are responsive ---
+add_cron "arr-health-monitor.sh" \
+    "*/30 * * * * ${SUPARR_SCRIPTS}/arr-health-monitor.sh >> /var/log/suparr-health-monitor.log 2>&1" \
+    "Arr health monitor (every 30 min)"
+
+# --- Trakt token refresh: keep import list OAuth tokens alive ---
+add_cron "arr-trakt-refresh.sh" \
+    "0 6 */3 * * ${SUPARR_SCRIPTS}/arr-trakt-refresh.sh >> /var/log/suparr-trakt-refresh.log 2>&1" \
+    "Trakt token refresh (every 3 days)"
+
+# --- Missing content search: trigger searches for wanted items ---
+add_cron "missing-search.sh" \
+    "10 3 * * * ${SUPARR_SCRIPTS}/missing-search.sh >> /var/log/suparr-missing-search.log 2>&1" \
+    "Missing content search (daily 3:10 AM)"
+
+# --- Queue cleanup: remove stale/stuck queue items ---
+add_cron "queue-cleanup.sh" \
+    "0 */6 * * * ${SUPARR_SCRIPTS}/queue-cleanup.sh >> /var/log/suparr-queue-cleanup.log 2>&1" \
+    "Queue cleanup (every 6 hours)"
+
+# --- Download cleanup: remove old completed/incomplete downloads ---
+add_cron "download-cleanup.sh" \
+    "0 4 * * * ${SUPARR_SCRIPTS}/download-cleanup.sh >> /var/log/suparr-download-cleanup.log 2>&1" \
+    "Download cleanup (daily 4 AM)"
+
+# --- Auto-import: force-import stuck queue items ---
+add_cron "auto-import.py" \
+    "*/30 * * * * python3 ${SUPARR_SCRIPTS}/auto-import.py >> /var/log/suparr-auto-import.log 2>&1" \
+    "Auto-import stuck items (every 30 min)"
+
+# --- Container watchdog: recover dead containers after Watchtower ---
+add_cron "container-watchdog.sh" \
+    "15 5 * * * ${SUPARR_SCRIPTS}/container-watchdog.sh >> /var/log/container-watchdog.log 2>&1" \
+    "Container watchdog (daily 5:15 AM, post-Watchtower)"
+
+# Only add the quiet watchdog if the loud one is there but quiet isn't
+if ! echo "$EXISTING_CRON" | grep -qF "watchdog.sh --quiet"; then
+    EXISTING_CRON="${EXISTING_CRON}
+*/30 * * * * ${SUPARR_SCRIPTS}/container-watchdog.sh --quiet >> /var/log/container-watchdog.log 2>&1"
+    log "  Container watchdog quiet (every 30 min) — installed"
+else
+    log "  Container watchdog quiet (every 30 min) — already installed"
+fi
+
+# Write the assembled crontab
+echo "$EXISTING_CRON" | crontab -
+log "System crons installed ($(echo "$EXISTING_CRON" | grep -c '^[^#]' || echo 0) entries total)"
+
+# Make all scripts executable
+chmod +x "${SUPARR_SCRIPTS}"/*.sh "${SUPARR_SCRIPTS}"/*.py 2>/dev/null || true
 
 # ===========================================================================
 header "Phase 9: Summary"
@@ -2005,7 +2303,11 @@ echo "  │  ✓ Immich photo/video backup (ML on NVMe)        │"
 echo "  │  ✓ Syncthing file sync (phone → NAS)             │"
 echo "  │  ✓ Immich DB backup cron (nightly, 7-day retain) │"
 echo "  │  ✓ Audiobookshelf: admin user + libraries        │"
-echo "  │  ✓ Stash: config seeded + content scan           │"
+echo "  │  ✓ System crons: disk guard, health, cleanup     │"
+echo "  │  ✓ Container watchdog (post-Watchtower recovery) │"
+echo "  │  ✓ Trakt token auto-refresh (every 3 days)      │"
+echo "  │  ✓ Queue cleanup + auto-import (every 30m/6h)   │"
+echo "  │  ✓ Missing content search (daily)                │"
 if [ "$MIGRATE_LIBRARY" = "true" ]; then
 echo "  │  ✓ Migration source mounted (read-only)         │"
 fi

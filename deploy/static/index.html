@@ -86,12 +86,19 @@
             <div class="form-row mt-16">
                 <div class="form-group">
                     <label class="form-label">SSH Username</label>
-                    <input class="form-input" data-key="ssh_user" type="text" value="root">
+                    <input class="form-input" data-key="ssh_user" type="text" value="jolly">
                 </div>
                 <div class="form-group">
                     <label class="form-label">SSH Password <span class="optional">(for key deploy)</span></label>
-                    <input class="form-input" data-key="ssh_pass" type="password" placeholder="Used once, then discarded">
+                    <input class="form-input" data-key="ssh_pass" type="password" placeholder="User login password">
                 </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Root Password <span class="optional">(for initial setup)</span></label>
+                    <input class="form-input" data-key="root_pass" type="password" placeholder="Grants temporary sudo, revoked after deploy">
+                </div>
+                <div></div>
             </div>
 
             <div class="form-group mt-16">
@@ -242,31 +249,86 @@
                 <div class="form-help">Set manually if Plex is on a different host than Spyglass</div>
             </div>
 
-            <div class="form-row mt-16">
+            <div class="mt-24 mb-8">
+                <div class="form-label" style="font-size:14px;font-weight:600">Import Lists</div>
+                <div class="form-help mb-12">Auto-discover new content. Toggle sources on to see their configuration fields.</div>
+            </div>
+
+            <div class="picker-grid" style="margin-bottom:16px">
+                <label class="picker-item">
+                    <input type="checkbox" data-key="import_tmdb" checked onchange="updateImportVisibility()">
+                    <div class="picker-item-info">
+                        <span class="picker-item-label">TMDb Popular</span>
+                        <span class="picker-item-desc">Popular movies &amp; shows. Free API key.</span>
+                    </div>
+                </label>
+                <label class="picker-item">
+                    <input type="checkbox" data-key="import_stevenlu" checked onchange="updateImportVisibility()">
+                    <div class="picker-item-info">
+                        <span class="picker-item-label">StevenLu Popular</span>
+                        <span class="picker-item-desc">Popular movies. No API key needed. Radarr only.</span>
+                    </div>
+                </label>
+                <label class="picker-item">
+                    <input type="checkbox" data-key="import_trakt" onchange="updateImportVisibility()">
+                    <div class="picker-item-info">
+                        <span class="picker-item-label">Trakt Popular &amp; Trending</span>
+                        <span class="picker-item-desc">Requires free Trakt app + device auth.</span>
+                    </div>
+                </label>
+                <label class="picker-item">
+                    <input type="checkbox" data-key="import_mdblist" onchange="updateImportVisibility()">
+                    <div class="picker-item-info">
+                        <span class="picker-item-label">MDBList Custom Lists</span>
+                        <span class="picker-item-desc">Curated lists (e.g. RT &gt; 85%). Free API key.</span>
+                    </div>
+                </label>
+                <label class="picker-item">
+                    <input type="checkbox" data-key="import_imdb" onchange="updateImportVisibility()">
+                    <div class="picker-item-info">
+                        <span class="picker-item-label">IMDb Watchlist</span>
+                        <span class="picker-item-desc">Public IMDb list. No API key — just the list ID.</span>
+                    </div>
+                </label>
+            </div>
+
+            <div id="import-tmdb-fields" class="mt-8">
                 <div class="form-group">
                     <label class="form-label">TMDb API Key <span class="optional">(optional)</span></label>
-                    <input class="form-input" data-key="tmdb_api_key" type="text" placeholder="Free at themoviedb.org">
+                    <input class="form-input" data-key="tmdb_api_key" type="text" placeholder="Free at themoviedb.org/settings/api">
                 </div>
+            </div>
+
+            <div id="import-mdblist-fields" class="hidden mt-8">
                 <div class="form-group">
                     <label class="form-label">MDBList API Key <span class="optional">(optional)</span></label>
-                    <input class="form-input" data-key="mdblist_api_key" type="text" placeholder="Free at mdblist.com">
+                    <input class="form-input" data-key="mdblist_api_key" type="text" placeholder="Free at mdblist.com/preferences">
                 </div>
             </div>
 
-            <div class="form-row mt-16">
+            <div id="import-imdb-fields" class="hidden mt-8">
                 <div class="form-group">
-                    <label class="form-label">Trakt Client ID <span class="optional">(optional)</span></label>
-                    <input class="form-input" data-key="trakt_client_id" type="text" placeholder="Create app at trakt.tv">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Trakt Client Secret <span class="optional">(optional)</span></label>
-                    <input class="form-input" data-key="trakt_client_secret" type="password">
+                    <label class="form-label">IMDb List ID <span class="optional">(optional)</span></label>
+                    <input class="form-input" data-key="imdb_list_id" type="text" placeholder="ls012345678 or ur12345678">
+                    <div class="form-help">Watchlist: ur + your user number. Custom list: ls + list ID.</div>
                 </div>
             </div>
 
-            <div class="mt-16" id="trakt-auth-section">
-                <button class="btn btn-secondary" id="trakt-auth-btn" onclick="startTraktAuth()">Authorize Trakt</button>
-                <span class="text-sm text-muted" id="trakt-auth-status"></span>
+            <div id="import-trakt-fields" class="hidden mt-8">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Trakt Client ID <span class="optional">(optional)</span></label>
+                        <input class="form-input" data-key="trakt_client_id" type="text" placeholder="Create app at trakt.tv/oauth/applications">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Trakt Client Secret <span class="optional">(optional)</span></label>
+                        <input class="form-input" data-key="trakt_client_secret" type="password">
+                    </div>
+                </div>
+                <div class="mt-8">
+                    <button class="btn btn-secondary" id="trakt-auth-btn" onclick="startTraktAuth()">Authorize Trakt</button>
+                    <span class="text-sm text-muted" id="trakt-auth-status"></span>
+                </div>
             </div>
 
             <div class="step-nav">
@@ -280,11 +342,30 @@
             <div class="card-title">*arr Configuration</div>
             <div class="card-subtitle">Privateer (download stack) settings</div>
 
-            <div class="mb-16">
-                <label class="form-label mb-8">VPN Type</label>
+            <div class="form-row mb-16">
+                <div class="form-group">
+                    <label class="form-label">VPN Provider</label>
+                    <select class="form-input" data-key="vpn_provider" onchange="updateVpnFields()">
+                        <option value="nordvpn">NordVPN</option>
+                        <option value="mullvad">Mullvad</option>
+                        <option value="private internet access">Private Internet Access (PIA)</option>
+                        <option value="surfshark">Surfshark</option>
+                        <option value="protonvpn">ProtonVPN</option>
+                        <option value="windscribe">Windscribe</option>
+                        <option value="expressvpn">ExpressVPN</option>
+                        <option value="cyberghost">CyberGhost</option>
+                        <option value="airvpn">AirVPN</option>
+                        <option value="ivpn">IVPN</option>
+                        <option value="custom">Custom OpenVPN Config</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="vpn-protocol" class="mb-16">
+                <label class="form-label mb-8">VPN Protocol</label>
                 <div class="choice-group">
                     <div class="choice-card selected" data-value="wireguard" onclick="selectChoice('vpn_type', 'wireguard')">
-                        <div class="choice-card-title">WireGuard / NordLynx</div>
+                        <div class="choice-card-title">WireGuard</div>
                         <div class="choice-card-desc">Recommended — faster, lower overhead</div>
                     </div>
                     <div class="choice-card" data-value="openvpn" onclick="selectChoice('vpn_type', 'openvpn')">
@@ -296,34 +377,110 @@
 
             <div id="vpn-wireguard">
                 <div class="form-group">
-                    <label class="form-label">NordLynx Private Key</label>
-                    <input class="form-input" data-key="nord_wireguard_key" type="password">
-                    <div class="form-help">Get from NordVPN Linux app or API</div>
+                    <label class="form-label">WireGuard Private Key</label>
+                    <input class="form-input" data-key="vpn_wireguard_key" type="password">
+                    <div class="form-help">Get from your VPN provider's WireGuard/manual setup page</div>
+                </div>
+                <div class="form-group mt-8" id="vpn-wg-addresses">
+                    <label class="form-label">WireGuard Addresses <span class="optional">(optional)</span></label>
+                    <input class="form-input" data-key="vpn_wireguard_addresses" type="text" placeholder="10.x.x.x/32">
+                    <div class="form-help">Required for Mullvad/IVPN. Others auto-detect. From your WireGuard config.</div>
                 </div>
             </div>
 
             <div id="vpn-openvpn" class="hidden">
                 <div class="form-row">
                     <div class="form-group">
-                        <label class="form-label">Nord Service Username</label>
-                        <input class="form-input" data-key="nord_user" type="text">
-                        <div class="form-help">Service credentials — NOT your account email</div>
+                        <label class="form-label">VPN Username</label>
+                        <input class="form-input" data-key="vpn_user" type="text">
+                        <div class="form-help">Service/manual credentials — often different from your account login</div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Nord Service Password</label>
-                        <input class="form-input" data-key="nord_pass" type="password">
+                        <label class="form-label">VPN Password</label>
+                        <input class="form-input" data-key="vpn_pass" type="password">
+                    </div>
+                </div>
+            </div>
+
+            <div id="vpn-custom" class="hidden">
+                <div class="form-group">
+                    <label class="form-label">Custom OpenVPN Config Path</label>
+                    <input class="form-input" data-key="vpn_custom_config" type="text" placeholder="/path/to/custom.ovpn">
+                    <div class="form-help">Will be mounted into the Gluetun container</div>
+                </div>
+            </div>
+
+            <div id="vpn-server" class="form-row mt-16">
+                <div class="form-group">
+                    <label class="form-label">Server Country</label>
+                    <input class="form-input" data-key="vpn_server_countries" type="text" value="United States">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Server City <span class="optional">(optional)</span></label>
+                    <input class="form-input" data-key="vpn_server_cities" type="text" placeholder="Auto-select">
+                </div>
+            </div>
+
+            <div class="mt-24 mb-16">
+                <label class="form-label mb-8">Quality Tier</label>
+                <div class="choice-group">
+                    <div class="choice-card selected" data-value="hd" onclick="selectChoice('quality_tier', 'hd')">
+                        <div class="choice-card-title">HD (1080p)</div>
+                        <div class="choice-card-desc">~5-15 GB/movie. Best for most setups.</div>
+                    </div>
+                    <div class="choice-card" data-value="uhd" onclick="selectChoice('quality_tier', 'uhd')">
+                        <div class="choice-card-title">4K UHD</div>
+                        <div class="choice-card-desc">~30-80 GB/movie. Needs 4K display + storage.</div>
+                    </div>
+                    <div class="choice-card" data-value="both" onclick="selectChoice('quality_tier', 'both')">
+                        <div class="choice-card-title">Both</div>
+                        <div class="choice-card-desc">Dual profiles — pick per title. Most storage.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-24 mb-8">
+                <div class="form-label" style="font-size:14px;font-weight:600">Media Categories</div>
+                <div class="form-help mb-8">Folders, Plex libraries, and Tdarr libraries are created for each selected category.</div>
+            </div>
+            <div class="picker-grid" id="media-categories-grid">
+                <label class="picker-item"><input type="checkbox" data-cat="movies" checked><div class="picker-item-info"><span class="picker-item-label">Movies</span></div></label>
+                <label class="picker-item"><input type="checkbox" data-cat="tv" checked><div class="picker-item-info"><span class="picker-item-label">TV Shows</span></div></label>
+                <label class="picker-item"><input type="checkbox" data-cat="anime" checked><div class="picker-item-info"><span class="picker-item-label">Anime</span></div></label>
+                <label class="picker-item"><input type="checkbox" data-cat="anime-movies" checked><div class="picker-item-info"><span class="picker-item-label">Anime Movies</span></div></label>
+                <label class="picker-item"><input type="checkbox" data-cat="documentaries" checked><div class="picker-item-info"><span class="picker-item-label">Documentaries</span></div></label>
+                <label class="picker-item"><input type="checkbox" data-cat="concerts" checked><div class="picker-item-info"><span class="picker-item-label">Concerts</span></div></label>
+                <label class="picker-item"><input type="checkbox" data-cat="stand-up" checked><div class="picker-item-info"><span class="picker-item-label">Stand-Up</span></div></label>
+                <label class="picker-item"><input type="checkbox" data-cat="music" checked><div class="picker-item-info"><span class="picker-item-label">Music</span></div></label>
+                <label class="picker-item"><input type="checkbox" data-cat="books" checked><div class="picker-item-info"><span class="picker-item-label">Books</span></div></label>
+                <label class="picker-item"><input type="checkbox" data-cat="audiobooks" checked><div class="picker-item-info"><span class="picker-item-label">Audiobooks</span></div></label>
+                <label class="picker-item"><input type="checkbox" data-cat="adult" checked><div class="picker-item-info"><span class="picker-item-label">Adult</span></div></label>
+            </div>
+            <input type="hidden" data-key="media_categories">
+
+            <div class="mt-24 mb-16">
+                <label class="form-label mb-8">Transcode Schedule</label>
+                <div class="choice-group">
+                    <div class="choice-card selected" data-value="offhours" onclick="selectChoice('tdarr_schedule', 'offhours')">
+                        <div class="choice-card-title">Off-Hours</div>
+                        <div class="choice-card-desc">1 AM – 5 PM. Avoids competing with Plex during viewing.</div>
+                    </div>
+                    <div class="choice-card" data-value="always" onclick="selectChoice('tdarr_schedule', 'always')">
+                        <div class="choice-card-title">24/7</div>
+                        <div class="choice-card-desc">Dedicated box or don't care.</div>
+                    </div>
+                    <div class="choice-card" data-value="overnight" onclick="selectChoice('tdarr_schedule', 'overnight')">
+                        <div class="choice-card-title">Overnight</div>
+                        <div class="choice-card-desc">12 AM – 8 AM. Minimal impact.</div>
                     </div>
                 </div>
             </div>
 
             <div class="form-row mt-16">
                 <div class="form-group">
-                    <label class="form-label">VPN Country</label>
-                    <input class="form-input" data-key="nord_country" type="text" value="United States">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">VPN City <span class="optional">(optional)</span></label>
-                    <input class="form-input" data-key="nord_city" type="text" placeholder="Auto-select">
+                    <label class="form-label">Download Speed Limit <span class="optional">(optional)</span></label>
+                    <input class="form-input" data-key="download_speed_limit" type="text" placeholder="0 = unlimited (MB/s)">
+                    <div class="form-help">Applied to both qBittorrent and SABnzbd. Leave blank or 0 for no limit.</div>
                 </div>
             </div>
 
@@ -377,8 +534,21 @@
             </div>
         </div>
 
-        <!-- ── Step 6: Notifications ───────────────────────────────── -->
+        <!-- ── Step 6: Component Picker ─────────────────────────────── -->
         <div class="step-panel card hidden" data-step="6">
+            <div class="card-title">Components</div>
+            <div class="card-subtitle">Choose what to deploy. Infrastructure services run on every install.</div>
+
+            <div id="component-picker"></div>
+
+            <div class="step-nav">
+                <button class="btn btn-secondary" onclick="prevStep()">Back</button>
+                <button class="btn btn-primary" onclick="nextStep()">Continue</button>
+            </div>
+        </div>
+
+        <!-- ── Step 7: Notifications ───────────────────────────────── -->
+        <div class="step-panel card hidden" data-step="7">
             <div class="card-title">Notifications</div>
             <div class="card-subtitle">Discord alerts for updates, downloads, and monitoring</div>
 
@@ -400,8 +570,8 @@
             </div>
         </div>
 
-        <!-- ── Step 7: Review & Deploy ─────────────────────────────── -->
-        <div class="step-panel card hidden" data-step="7">
+        <!-- ── Step 8: Review & Deploy ─────────────────────────────── -->
+        <div class="step-panel card hidden" data-step="8">
             <div class="card-title">Review &amp; Deploy</div>
             <div class="card-subtitle">Verify your configuration before deploying</div>
 
@@ -421,8 +591,8 @@
             </div>
         </div>
 
-        <!-- ── Step 8: Deploy Progress ─────────────────────────────── -->
-        <div class="step-panel hidden" data-step="8" style="width:100%">
+        <!-- ── Step 9: Deploy Progress ─────────────────────────────── -->
+        <div class="step-panel hidden" data-step="9" style="width:100%">
             <div class="card mb-16">
                 <div class="flex items-center justify-between mb-16">
                     <div class="card-title" style="margin:0">Deploying...</div>
@@ -472,8 +642,8 @@
             </div>
         </div>
 
-        <!-- ── Step 9: Post-Deploy Report ──────────────────────────── -->
-        <div class="step-panel hidden" data-step="9" style="width:100%">
+        <!-- ── Step 10: Post-Deploy Report ─────────────────────────── -->
+        <div class="step-panel hidden" data-step="10" style="width:100%">
             <div class="card mb-16">
                 <div class="card-title">Deployment Complete</div>
                 <div class="card-subtitle" id="deploy-result-msg"></div>

@@ -289,6 +289,49 @@ FIELD_SCHEMA = [
         "optional": True,
         "help": "Auto-detected if blank. Set manually if Plex is on a different host.",
     },
+    # ── Import List Sources ──────────────────────────────────────────────
+    {
+        "key": "import_tmdb",
+        "label": "TMDb Popular",
+        "default": "true",
+        "section": "plex",
+        "type": "toggle",
+        "help": "Auto-add popular movies and shows from TMDb. Free API key required.",
+    },
+    {
+        "key": "import_stevenlu",
+        "label": "StevenLu Popular",
+        "default": "true",
+        "section": "plex",
+        "type": "toggle",
+        "help": "Popular movies list — no API key needed. Radarr only.",
+    },
+    {
+        "key": "import_trakt",
+        "label": "Trakt Popular & Trending",
+        "default": "false",
+        "section": "plex",
+        "type": "toggle",
+        "help": "Popular and trending from Trakt. Requires free Trakt app credentials + device auth.",
+    },
+    {
+        "key": "import_mdblist",
+        "label": "MDBList Custom Lists",
+        "default": "false",
+        "section": "plex",
+        "type": "toggle",
+        "help": "Your curated MDBList lists (e.g. RT > 85%). Free API key required.",
+    },
+    {
+        "key": "import_imdb",
+        "label": "IMDb Watchlist",
+        "default": "false",
+        "section": "plex",
+        "type": "toggle",
+        "help": "Import from a public IMDb watchlist. No API key — just the list URL.",
+    },
+
+    # ── API Keys (conditional on import list selection) ───────────────
     {
         "key": "tmdb_api_key",
         "label": "TMDb API Key",
@@ -297,6 +340,7 @@ FIELD_SCHEMA = [
         "type": "text",
         "optional": True,
         "help": "Free at themoviedb.org/settings/api",
+        "condition": "import_tmdb === 'true'",
     },
     {
         "key": "mdblist_api_key",
@@ -306,6 +350,18 @@ FIELD_SCHEMA = [
         "type": "text",
         "optional": True,
         "help": "Free at mdblist.com/preferences",
+        "condition": "import_mdblist === 'true'",
+    },
+    {
+        "key": "imdb_list_id",
+        "label": "IMDb List ID",
+        "default": "",
+        "section": "plex",
+        "type": "text",
+        "optional": True,
+        "placeholder": "ls012345678 or ur12345678",
+        "help": "From the IMDb list URL. Watchlist: ur + your user number. Custom list: ls + list ID.",
+        "condition": "import_imdb === 'true'",
     },
     {
         "key": "trakt_client_id",
@@ -315,6 +371,7 @@ FIELD_SCHEMA = [
         "type": "text",
         "optional": True,
         "help": "Create app at trakt.tv/oauth/applications",
+        "condition": "import_trakt === 'true'",
     },
     {
         "key": "trakt_client_secret",
@@ -324,6 +381,7 @@ FIELD_SCHEMA = [
         "type": "password",
         "secret": True,
         "optional": True,
+        "condition": "import_trakt === 'true'",
     },
     # Trakt OAuth tokens — auto-populated by device auth
     {
@@ -361,60 +419,172 @@ FIELD_SCHEMA = [
 
     # ── Step 5: Arr Config ─────────────────────────────────────────────────
     {
+        "key": "vpn_provider",
+        "label": "VPN Provider",
+        "default": "nordvpn",
+        "section": "arr",
+        "type": "select",
+        "choices": [
+            {"value": "nordvpn", "label": "NordVPN"},
+            {"value": "mullvad", "label": "Mullvad"},
+            {"value": "private internet access", "label": "Private Internet Access (PIA)"},
+            {"value": "surfshark", "label": "Surfshark"},
+            {"value": "protonvpn", "label": "ProtonVPN"},
+            {"value": "windscribe", "label": "Windscribe"},
+            {"value": "expressvpn", "label": "ExpressVPN"},
+            {"value": "cyberghost", "label": "CyberGhost"},
+            {"value": "airvpn", "label": "AirVPN"},
+            {"value": "ivpn", "label": "IVPN"},
+            {"value": "custom", "label": "Custom OpenVPN Config"},
+        ],
+        "help": "Gluetun-supported VPN provider. Your VPN subscription credentials go below.",
+    },
+    {
         "key": "vpn_type",
-        "label": "VPN Type",
+        "label": "VPN Protocol",
         "default": "wireguard",
         "section": "arr",
         "type": "choice",
         "choices": [
-            {"value": "wireguard", "label": "WireGuard / NordLynx", "description": "Recommended — faster, lower overhead"},
+            {"value": "wireguard", "label": "WireGuard", "description": "Recommended — faster, lower overhead"},
             {"value": "openvpn", "label": "OpenVPN", "description": "Legacy — wider compatibility"},
         ],
+        "condition": "vpn_provider !== 'custom'",
     },
+    # WireGuard credentials
     {
-        "key": "nord_wireguard_key",
-        "label": "NordLynx Private Key",
+        "key": "vpn_wireguard_key",
+        "label": "WireGuard Private Key",
         "default": "",
         "section": "arr",
         "type": "password",
         "secret": True,
         "condition": "vpn_type === 'wireguard'",
-        "help": "Get from NordVPN Linux app or API",
+        "help": "Get from your VPN provider's manual/WireGuard setup page",
     },
     {
-        "key": "nord_user",
-        "label": "Nord Service Username",
+        "key": "vpn_wireguard_addresses",
+        "label": "WireGuard Addresses",
+        "default": "",
+        "section": "arr",
+        "type": "text",
+        "optional": True,
+        "condition": "vpn_type === 'wireguard'",
+        "placeholder": "10.x.x.x/32",
+        "help": "Required for Mullvad/IVPN. Others auto-detect. Get from your WireGuard config.",
+    },
+    # OpenVPN credentials
+    {
+        "key": "vpn_user",
+        "label": "VPN Username",
         "default": "",
         "section": "arr",
         "type": "text",
         "condition": "vpn_type === 'openvpn'",
-        "help": "Service credentials from nordvpn.com/manual-setup — NOT your account email",
+        "help": "Service/manual credentials — often different from your account login",
     },
     {
-        "key": "nord_pass",
-        "label": "Nord Service Password",
+        "key": "vpn_pass",
+        "label": "VPN Password",
         "default": "",
         "section": "arr",
         "type": "password",
         "secret": True,
         "condition": "vpn_type === 'openvpn'",
     },
+    # Server selection
     {
-        "key": "nord_country",
-        "label": "VPN Country",
+        "key": "vpn_server_countries",
+        "label": "Server Country",
         "default": "United States",
         "section": "arr",
         "type": "text",
+        "condition": "vpn_provider !== 'custom'",
     },
     {
-        "key": "nord_city",
-        "label": "VPN City",
+        "key": "vpn_server_cities",
+        "label": "Server City",
         "default": "",
         "section": "arr",
         "type": "text",
         "optional": True,
+        "condition": "vpn_provider !== 'custom'",
         "help": "Leave blank for auto-selection",
     },
+    # Custom OpenVPN
+    {
+        "key": "vpn_custom_config",
+        "label": "Custom OpenVPN Config Path",
+        "default": "",
+        "section": "arr",
+        "type": "text",
+        "condition": "vpn_provider === 'custom'",
+        "placeholder": "/path/to/custom.ovpn",
+        "help": "Will be mounted into the Gluetun container",
+    },
+    {
+        "key": "quality_tier",
+        "label": "Quality Tier",
+        "default": "hd",
+        "section": "arr",
+        "type": "choice",
+        "choices": [
+            {"value": "hd", "label": "HD (1080p)", "description": "Standard quality — ~5-15 GB/movie. Best for most setups."},
+            {"value": "uhd", "label": "4K UHD", "description": "Ultra HD + HDR — ~30-80 GB/movie. Needs 4K display + storage."},
+            {"value": "both", "label": "Both (1080p + 4K)", "description": "Dual profiles — choose per title. Needs the most storage."},
+        ],
+        "help": "Sets quality profiles in Radarr/Sonarr via Recyclarr. Can be changed post-deploy.",
+    },
+    # ── Media Categories ──────────────────────────────────────────────────
+    {
+        "key": "media_categories",
+        "label": "Media Categories",
+        "default": "movies,tv,anime,anime-movies,documentaries,concerts,stand-up,music,books,audiobooks,adult",
+        "section": "arr",
+        "type": "text",
+        "help": "Comma-separated. Folders, Plex libraries, and Tdarr libraries are created for each.",
+    },
+
+    # ── Tdarr Schedule ───────────────────────────────────────────────────
+    {
+        "key": "tdarr_schedule",
+        "label": "Transcode Schedule",
+        "default": "offhours",
+        "section": "arr",
+        "type": "choice",
+        "choices": [
+            {"value": "offhours", "label": "Off-Hours (1 AM – 5 PM)", "description": "Avoids competing with Plex during evening viewing"},
+            {"value": "always", "label": "24/7", "description": "For dedicated transcode boxes or when you don't care"},
+            {"value": "overnight", "label": "Overnight (12 AM – 8 AM)", "description": "Minimal impact, slower throughput"},
+        ],
+    },
+
+    # ── Download Speed Limits ────────────────────────────────────────────
+    {
+        "key": "download_speed_limit",
+        "label": "Download Speed Limit (MB/s)",
+        "default": "0",
+        "section": "arr",
+        "type": "text",
+        "optional": True,
+        "placeholder": "0 = unlimited",
+        "help": "Applied to both qBittorrent and SABnzbd. 0 or blank = no limit.",
+        "validate": r"^\d*$",
+    },
+
+    # ── MDBList ──────────────────────────────────────────────────────────
+    {
+        "key": "mdblist_lists",
+        "label": "MDBList List IDs",
+        "default": "",
+        "section": "arr",
+        "type": "text",
+        "optional": True,
+        "condition": "import_mdblist === 'true'",
+        "placeholder": "12345, 67890",
+        "help": "Comma-separated list IDs from mdblist.com. Find the ID in the list URL.",
+    },
+
     {
         "key": "qbit_password",
         "label": "qBittorrent Password",
@@ -498,6 +668,132 @@ FIELD_SCHEMA = [
         "help": "Auto-derived from Discord webhook",
     },
 ]
+
+
+# ── Component Registry ────────────────────────────────────────────────────────
+# Defines every deployable component, its tier, dependencies, and profile name.
+# The picker UI renders from this. Docker Compose profiles control startup.
+# "profile" is the compose profile name — services without one always start.
+
+COMPONENT_REGISTRY = {
+    # ── ALWAYS ON (no profile, no toggle) ────────────────────────────────────
+    # These are infrastructure that every deployment needs.
+    "gluetun":          {"tier": "infra",     "label": "Gluetun VPN",              "machine": "arr", "always": True},
+    "tailscale":        {"tier": "infra",     "label": "Tailscale",                "machine": "both", "always": True},
+    "autoheal":         {"tier": "infra",     "label": "Autoheal",                 "machine": "arr", "always": True},
+    "watchtower":       {"tier": "infra",     "label": "Watchtower",               "machine": "both", "always": True},
+    "homepage":         {"tier": "infra",     "label": "Homepage Dashboard",       "machine": "both", "always": True},
+    "dozzle":           {"tier": "infra",     "label": "Dozzle Log Viewer",        "machine": "arr", "always": True},
+    "backup":           {"tier": "infra",     "label": "Config Backup",            "machine": "both", "always": True},
+    "maintenance":      {"tier": "infra",     "label": "Disk Maintenance",         "machine": "arr", "always": True},
+    "download-monitor": {"tier": "infra",     "label": "Download Monitor",         "machine": "arr", "always": True},
+    "unpackerr":        {"tier": "infra",     "label": "Unpackerr",                "machine": "arr", "always": True,
+                         "desc": "Auto-extracts archives from downloads. Required for usenet and some torrent releases."},
+
+    # ── DESELECTABLE INFRA (on by default, warning if removed) ───────────────
+    "prowlarr":         {"tier": "infra-warn", "label": "Prowlarr",      "machine": "arr", "profile": "svc-prowlarr",    "default": True,
+                         "desc": "Central indexer hub. All *arr apps pull search results through this. Disabling means manual indexer config in every app."},
+    "flaresolverr":     {"tier": "infra-warn", "label": "FlareSolverr",  "machine": "arr", "profile": "svc-flaresolverr","default": True,
+                         "desc": "Cloudflare bypass for indexer sites. Without it, many indexers return empty results."},
+    "bazarr":           {"tier": "infra-warn", "label": "Bazarr",        "machine": "arr", "profile": "svc-bazarr",      "default": True,
+                         "desc": "Automatic subtitle downloads for movies & TV. Searches 5+ providers, upgrades subs for 7 days."},
+    "recyclarr":        {"tier": "infra-warn", "label": "Recyclarr",     "machine": "arr", "profile": "svc-recyclarr",   "default": True,
+                         "desc": "Syncs TRaSH quality/release profiles to Radarr and Sonarr. Without it, downloads may grab wrong quality or format."},
+    "notifiarr":        {"tier": "infra-warn", "label": "Notifiarr",     "machine": "arr", "profile": "svc-notifiarr",   "default": True,
+                         "desc": "Central notification hub for all *arr events to Discord. Requires free account at notifiarr.com."},
+
+    # ── DOWNLOAD CLIENTS (pick at least one) ─────────────────────────────────
+    "qbittorrent":      {"tier": "download",   "label": "qBittorrent",   "machine": "arr", "profile": "svc-qbittorrent", "default": True,
+                         "desc": "Torrent client running through VPN tunnel."},
+    "sabnzbd":          {"tier": "download",   "label": "SABnzbd",       "machine": "arr", "profile": "svc-sabnzbd",     "default": True,
+                         "desc": "Usenet download client running through VPN tunnel."},
+
+    # ── CONTENT MANAGERS (pick any) ──────────────────────────────────────────
+    "radarr":           {"tier": "content",    "label": "Radarr",        "machine": "arr", "profile": "svc-radarr",      "default": True,
+                         "desc": "Movie management — searches, grabs, and organizes your film library."},
+    "sonarr":           {"tier": "content",    "label": "Sonarr",        "machine": "arr", "profile": "svc-sonarr",      "default": True,
+                         "desc": "TV series management — monitors shows, grabs new episodes automatically."},
+    "lidarr":           {"tier": "content",    "label": "Lidarr",        "machine": "arr", "profile": "svc-lidarr",      "default": True,
+                         "desc": "Music library management — album tracking, automated downloads."},
+    "bookshelf":        {"tier": "content",    "label": "Bookshelf",     "machine": "arr", "profile": "svc-bookshelf",   "default": True,
+                         "desc": "Book & audiobook management (Readarr fork with working metadata)."},
+    "whisparr":         {"tier": "content",    "label": "Whisparr",      "machine": "arr", "profile": "svc-whisparr",    "default": False,
+                         "desc": "Adult content management. Enables Stash + studio tagger on Spyglass.",
+                         "enables_on_plex": ["stash", "stash-tagger"]},
+
+    # ── SPYGLASS ADD-ONS ─────────────────────────────────────────────────────
+    "stash":            {"tier": "plex-addon",  "label": "Stash",              "machine": "plex", "profile": "svc-stash", "default": False,
+                         "desc": "Adult content browser & organizer. Auto-enabled when Whisparr is selected.",
+                         "auto_with": "whisparr"},
+    "stash-tagger":     {"tier": "plex-addon",  "label": "Stash Studio Tagger","machine": "plex", "profile": "svc-stash", "default": False,
+                         "desc": "Auto-tags Stash content with production studios every 30 minutes.",
+                         "auto_with": "whisparr"},
+
+    # ── DISC RIPPING ─────────────────────────────────────────────────────────
+    "makemkv":          {"tier": "disc-rip",   "label": "MakeMKV",            "machine": "plex", "profile": "svc-makemkv", "default": False,
+                         "desc": "Rip Blu-ray and DVD discs to MKV via web UI. Needs optical drive."},
+    "handbrake":        {"tier": "disc-rip",   "label": "Handbrake",          "machine": "plex", "profile": "svc-handbrake", "default": False,
+                         "desc": "Manual video transcoding with full control. Web UI. Works on any video file."},
+
+    # ── OPTIONAL ADD-ONS ─────────────────────────────────────────────────────
+    "autobrr":          {"tier": "optional",   "label": "Autobrr",            "machine": "arr", "profile": "svc-autobrr",  "default": False,
+                         "desc": "IRC/torrent auto-grab automation for power users."},
+    "weekly-digest":    {"tier": "optional",   "label": "Weekly Digest",      "machine": "arr", "profile": "svc-digest",   "default": True,
+                         "desc": "Weekly stats summary to Discord — movies, shows, music added."},
+    "immich":           {"tier": "optional",   "label": "Immich",             "machine": "arr", "profile": "svc-immich",   "default": True,
+                         "desc": "Google Photos replacement — phone backup with AI face/object search. (4 containers)"},
+    "syncthing":        {"tier": "optional",   "label": "Syncthing",          "machine": "arr", "profile": "svc-syncthing","default": True,
+                         "desc": "Peer-to-peer file sync — phone photos, documents, backups to NAS."},
+    "audiobookshelf":   {"tier": "optional",   "label": "Audiobookshelf",     "machine": "arr", "profile": "svc-audiobookshelf", "default": True,
+                         "desc": "Audiobook & podcast server with progress tracking and mobile apps."},
+}
+
+# Tier display metadata for the picker UI
+COMPONENT_TIERS = [
+    {"id": "download",   "label": "Download Clients",            "hint": "Pick at least one",                       "min": 1},
+    {"id": "content",    "label": "Content Managers",             "hint": "Pick the media types you want",           "min": 0},
+    {"id": "infra-warn", "label": "Infrastructure",               "hint": "On by default — deselecting not recommended", "min": 0, "warn": True},
+    {"id": "optional",   "label": "Optional Add-ons",            "hint": "Extra features",                          "min": 0},
+    {"id": "disc-rip",   "label": "Disc Ripping",                "hint": "Rip your own Blu-rays and DVDs",          "min": 0},
+    {"id": "plex-addon", "label": "Spyglass Add-ons",            "hint": "Runs on the Plex machine",                "min": 0},
+]
+
+
+def get_component_registry():
+    """Return the component registry and tier metadata for the picker UI."""
+    return {"components": COMPONENT_REGISTRY, "tiers": COMPONENT_TIERS}
+
+
+def get_selected_profiles(config):
+    """Build the COMPOSE_PROFILES value from selected services.
+    Returns separate profile strings for plex and arr machines.
+    """
+    selected = config.get("selected_services", {})
+    # If no picker data, default to all components with default=True
+    if not selected:
+        selected = {k: v.get("default", False) for k, v in COMPONENT_REGISTRY.items()
+                    if not v.get("always")}
+
+    # Apply dependency: whisparr enables stash on plex
+    if selected.get("whisparr"):
+        selected["stash"] = True
+        selected["stash-tagger"] = True
+
+    arr_profiles = []
+    plex_profiles = []
+    for key, comp in COMPONENT_REGISTRY.items():
+        profile = comp.get("profile")
+        if not profile:
+            continue  # always-on services have no profile
+        if not selected.get(key, comp.get("default", False)):
+            continue
+        if comp["machine"] in ("arr", "both"):
+            arr_profiles.append(profile)
+        if comp["machine"] in ("plex", "both"):
+            plex_profiles.append(profile)
+
+    # Deduplicate (stash and stash-tagger share svc-stash)
+    return ",".join(sorted(set(plex_profiles))), ",".join(sorted(set(arr_profiles)))
 
 
 def get_schema():
@@ -642,10 +938,13 @@ def generate_plex_env(config):
     # Watchtower URL
     wt_url = derive_watchtower_url(config.get("discord_webhook_url", ""))
 
+    plex_profiles, _ = get_selected_profiles(config)
+
     lines = [
         "# =============================================================================",
         "# Spyglass (Plex Server) — Generated by SupArr Deploy GUI",
         "# =============================================================================",
+        f"COMPOSE_PROFILES={_q(plex_profiles)}",
         f"PUID={_q(config.get('puid', '1000'))}",
         f"PGID={_q(config.get('pgid', '1000'))}",
         f"TZ={_q(config.get('tz', 'America/Chicago'))}",
@@ -685,10 +984,13 @@ def generate_arr_env(config):
     if not immich_pw:
         immich_pw = secrets.token_hex(12)
 
+    _, arr_profiles = get_selected_profiles(config)
+
     lines = [
         "# =============================================================================",
         "# Privateer (*arr Stack) — Generated by SupArr Deploy GUI",
         "# =============================================================================",
+        f"COMPOSE_PROFILES={_q(arr_profiles)}",
         f"PUID={_q(config.get('puid', '1000'))}",
         f"PGID={_q(config.get('pgid', '1000'))}",
         f"TZ={_q(config.get('tz', 'America/Chicago'))}",
@@ -699,12 +1001,17 @@ def generate_arr_env(config):
         f"NAS_MEDIA_EXPORT={_q(config.get('nas_media_export', ''))}",
         f"NAS_DOWNLOADS_EXPORT={_q(config.get('nas_downloads_export', ''))}",
         f"NAS_BACKUPS_EXPORT={_q(config.get('nas_backups_export', ''))}",
-        f"NORD_VPN_TYPE={_q(config.get('vpn_type', 'wireguard'))}",
-        f"NORD_USER={_q(config.get('nord_user', ''))}",
-        f"NORD_PASS={_q(config.get('nord_pass', ''))}",
-        f"NORD_WIREGUARD_KEY={_q(config.get('nord_wireguard_key', ''))}",
-        f"NORD_COUNTRY={_q(config.get('nord_country', 'United States'))}",
-        f"NORD_CITY={_q(config.get('nord_city', ''))}",
+        f"VPN_PROVIDER={_q(config.get('vpn_provider', 'nordvpn'))}",
+        f"VPN_TYPE={_q(config.get('vpn_type', 'wireguard'))}",
+        f"VPN_USER={_q(config.get('vpn_user', ''))}",
+        f"VPN_PASS={_q(config.get('vpn_pass', ''))}",
+        f"VPN_WIREGUARD_KEY={_q(config.get('vpn_wireguard_key', ''))}",
+        f"VPN_WIREGUARD_ADDRESSES={_q(config.get('vpn_wireguard_addresses', ''))}",
+        f"VPN_SERVER_COUNTRIES={_q(config.get('vpn_server_countries', 'United States'))}",
+        f"VPN_SERVER_CITIES={_q(config.get('vpn_server_cities', ''))}",
+        f"VPN_CUSTOM_CONFIG={_q(config.get('vpn_custom_config', ''))}",
+        f"VPN_ENDPOINT_IP={_q(config.get('vpn_endpoint_ip', ''))}",
+        f"VPN_ENDPOINT_PORT={_q(config.get('vpn_endpoint_port', ''))}",
         f"LOCAL_SUBNET={_q(config.get('local_subnet', '192.168.1.0/24'))}",
         f"TAILSCALE_AUTH_KEY={_q(config.get('tailscale_auth_key', ''))}",
         f"QBIT_PASSWORD={_q(config.get('qbit_password', 'SupArr2026!'))}",
@@ -722,6 +1029,19 @@ def generate_arr_env(config):
         f"PLEX_TOKEN={_q(config.get('plex_token', ''))}",
         f"PLEX_IP={_q(kometa_plex_ip)}",
         f"TMDB_API_KEY={_q(config.get('tmdb_api_key', ''))}",
+        f"MDBLIST_API_KEY={_q(config.get('mdblist_api_key', ''))}",
+        f"IMDB_LIST_ID={_q(config.get('imdb_list_id', ''))}",
+        "# Import list sources (true/false)",
+        f"IMPORT_TMDB={_q(config.get('import_tmdb', 'true'))}",
+        f"IMPORT_STEVENLU={_q(config.get('import_stevenlu', 'true'))}",
+        f"IMPORT_TRAKT={_q(config.get('import_trakt', 'false'))}",
+        f"IMPORT_MDBLIST={_q(config.get('import_mdblist', 'false'))}",
+        f"IMPORT_IMDB={_q(config.get('import_imdb', 'false'))}",
+        f"QUALITY_TIER={_q(config.get('quality_tier', 'hd'))}",
+        f"MEDIA_CATEGORIES={_q(config.get('media_categories', 'movies,tv,anime,anime-movies,documentaries,concerts,stand-up,music,books,audiobooks,adult'))}",
+        f"TDARR_SCHEDULE={_q(config.get('tdarr_schedule', 'offhours'))}",
+        f"DOWNLOAD_SPEED_LIMIT={_q(config.get('download_speed_limit', '0'))}",
+        f"MDBLIST_LISTS={_q(config.get('mdblist_lists', ''))}",
         f"IMMICH_DB_PASSWORD={_q(immich_pw)}",
         f"MIGRATE_LIBRARY={_q(config.get('migrate_library', 'false'))}",
         f"MIGRATE_SOURCE={_q(config.get('migrate_source', ''))}",
@@ -817,12 +1137,15 @@ def load_existing_env(project_dir):
 
     # Arr-specific mappings
     arr_to_config = {
-        "NORD_VPN_TYPE": "vpn_type",
-        "NORD_USER": "nord_user",
-        "NORD_PASS": "nord_pass",
-        "NORD_WIREGUARD_KEY": "nord_wireguard_key",
-        "NORD_COUNTRY": "nord_country",
-        "NORD_CITY": "nord_city",
+        "VPN_PROVIDER": "vpn_provider",
+        "VPN_TYPE": "vpn_type",
+        "VPN_USER": "vpn_user",
+        "VPN_PASS": "vpn_pass",
+        "VPN_WIREGUARD_KEY": "vpn_wireguard_key",
+        "VPN_WIREGUARD_ADDRESSES": "vpn_wireguard_addresses",
+        "VPN_SERVER_COUNTRIES": "vpn_server_countries",
+        "VPN_SERVER_CITIES": "vpn_server_cities",
+        "VPN_CUSTOM_CONFIG": "vpn_custom_config",
         "QBIT_PASSWORD": "qbit_password",
         "NZBGEEK_API_KEY": "nzbgeek_api_key",
         "NOTIFIARR_API_KEY": "notifiarr_api_key",
@@ -857,6 +1180,7 @@ PLEX_SERVICES = [
     ("Tdarr", 8265, ""),
     ("Overseerr", 5055, ""),
     ("Tautulli", 8181, ""),
+    ("Stash", 9999, ""),
     ("Uptime Kuma", 3001, ""),
     ("Homepage", 3100, ""),
 ]
@@ -874,7 +1198,6 @@ ARR_SERVICES = [
     ("Audiobookshelf", 13378, ""),
     ("Immich", 2283, ""),
     ("Syncthing", 8384, ""),
-    ("Stash", 9999, ""),
     ("Homepage", 3101, ""),
     ("Dozzle", 8888, ""),
     ("Notifiarr", 5454, ""),

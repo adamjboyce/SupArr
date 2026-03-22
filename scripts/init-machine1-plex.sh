@@ -196,7 +196,14 @@ else
 fi
 
 # ===========================================================================
-header "Phase 1b: Network Environment Evaluation"
+header "Phase 1b: Hardware Profile"
+# ===========================================================================
+
+source "$SCRIPT_DIR/detect-hardware.sh"
+hw_report log
+
+# ===========================================================================
+header "Phase 1c: Network Environment Evaluation"
 # ===========================================================================
 # Informational only — reports findings and recommendations. Changes nothing.
 
@@ -231,7 +238,7 @@ if [ -n "$PRIMARY_NIC" ]; then
     fi
 
     if command -v nfsstat &>/dev/null; then
-        NFS_VER=$(nfsstat -m 2>/dev/null | grep -oP 'vers=\K[0-9]+' | head -1)
+        NFS_VER=$(nfsstat -m 2>/dev/null | grep -oP 'vers=\K[0-9]+' | head -1 || true)
         if [ -n "$NFS_VER" ]; then
             log "  NFS version in use: v$NFS_VER"
             [ "$NFS_VER" -lt 4 ] 2>/dev/null && warn "  NFSv4 is faster than v$NFS_VER — consider upgrading NFS exports"
@@ -268,6 +275,8 @@ info "Creating app data directories..."
 mkdir -p "$APPDATA"/{plex/{config,transcode},tdarr/{server,configs,logs,transcode_cache}}
 mkdir -p "$APPDATA"/{kometa/config,overseerr/config,tautulli/config}
 mkdir -p "$APPDATA"/{homepage/config,tailscale/state,uptime-kuma/data}
+mkdir -p "$APPDATA"/{stash/{config,generated,metadata,cache}}
+mkdir -p "$APPDATA"/{makemkv/config,handbrake/{config,output},rips}
 mkdir -p "$APPDATA"/backups
 
 if [ "$REAL_USER" != "root" ]; then
@@ -370,6 +379,29 @@ if [ -f "$KOMETA_CONF" ]; then
         sed -i "s|^    scope:.*|    scope: public|" "$KOMETA_CONF"
     fi
     log "Kometa credentials substituted"
+fi
+
+# --- Stash: pre-seed config.yml to skip setup wizard ---
+STASH_CONFIG="$APPDATA/stash/config/config.yml"
+if [ ! -f "$STASH_CONFIG" ]; then
+    info "Pre-seeding Stash config..."
+    mkdir -p "$(dirname "$STASH_CONFIG")"
+    cat > "$STASH_CONFIG" << 'STASHCFG'
+stashes:
+  - path: /data
+    excludeVideo: false
+    excludeImage: false
+database: /root/.stash/stash-go.sqlite
+generated: /generated
+cache: /cache
+blobs_path: /root/.stash/blobs
+blobs_storage: FILESYSTEM
+host: 0.0.0.0
+port: 9999
+STASHCFG
+    log "Stash config pre-seeded (content path: /data, wizard skipped)"
+else
+    log "Stash config already exists — skipping pre-seed"
 fi
 
 # --- Homepage config skeleton ---
@@ -569,7 +601,43 @@ fi
 
 
 # ===========================================================================
-header "Phase 11: Summary"
+header "Phase 11: Stash Setup"
+# ===========================================================================
+
+STASH_URL="http://localhost:9999"
+STASH_READY=false
+info "Waiting for Stash..."
+for attempt in $(seq 1 20); do
+    STASH_STATUS=$(curl -sf -X POST "$STASH_URL/graphql" \
+        -H "Content-Type: application/json" \
+        -d '{"query":"{ systemStatus { status } }"}' 2>/dev/null | jq -r '.data.systemStatus.status // empty' 2>/dev/null || echo "")
+    if [ "$STASH_STATUS" = "OK" ]; then
+        STASH_READY=true; break
+    elif [ "$STASH_STATUS" = "SETUP" ]; then
+        info "Running Stash setup via API..."
+        curl -sf -X POST "$STASH_URL/graphql" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"mutation { setup(input: { stashes: [{path: \"/data\", excludeVideo: false, excludeImage: false}], databaseFile: \"\", generatedLocation: \"\", cacheLocation: \"\", storeBlobsInDatabase: false, blobsLocation: \"\", configLocation: \"\" }) }"}' > /dev/null 2>&1 \
+            && log "Stash setup completed via API" \
+            || warn "Stash API setup failed"
+        STASH_READY=true; break
+    fi
+    sleep 2
+done
+
+if [ "$STASH_READY" = true ]; then
+    info "Triggering Stash content scan..."
+    curl -sf -X POST "$STASH_URL/graphql" \
+        -H "Content-Type: application/json" \
+        -d '{"query":"mutation { metadataScan(input: { paths: [\"/data\"] }) }"}' > /dev/null 2>&1 \
+        && log "Stash scan triggered for /data" \
+        || warn "Stash scan trigger failed"
+else
+    warn "Stash not ready — skipping auto-config"
+fi
+
+# ===========================================================================
+header "Phase 12: Summary"
 # ===========================================================================
 
 echo ""
@@ -595,6 +663,8 @@ echo "  │  ✓ Plex: 7 libraries auto-created (if token set) │"
 echo "  │  ✓ Tdarr: 7 libraries with QSV HEVC plugin stack│"
 echo "  │  ✓ Tdarr: schedule 1AM-5PM (off during viewing) │"
 echo "  │  ✓ Homepage: API keys injected for widgets       │"
+echo "  │  ✓ Stash: config seeded + content scan           │"
+echo "  │  ✓ Stash studio tagger (auto-tag every 30 min)  │"
 echo "  │  ✓ Uptime Kuma monitoring dashboard                │"
 echo "  │  ✓ Docker healthchecks on all services             │"
 echo "  │  ✓ Config backup automation (weekly + rotation)    │"

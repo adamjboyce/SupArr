@@ -45,6 +45,7 @@ class SupArrHandler(BaseHTTPRequestHandler):
         routes = {
             "/": self._serve_index,
             "/api/config/schema": self._get_schema,
+            "/api/config/components": self._get_components,
             "/api/config/load": self._get_config_load,
             "/api/deploy/status": self._get_deploy_status,
             "/api/deploy/stream": self._get_deploy_stream,
@@ -189,6 +190,11 @@ class SupArrHandler(BaseHTTPRequestHandler):
             "timezones": config.TIMEZONES,
         })
 
+    def _get_components(self):
+        if not self._check_auth():
+            return
+        self._send_json(config.get_component_registry())
+
     def _get_config_load(self):
         if not self._check_auth():
             return
@@ -260,6 +266,7 @@ class SupArrHandler(BaseHTTPRequestHandler):
         hosts = body.get("hosts", [])
         user = body.get("user", "root")
         password = body.get("password", "")
+        root_password = body.get("root_password", "")
         results = []
 
         # Generate key if needed
@@ -277,7 +284,7 @@ class SupArrHandler(BaseHTTPRequestHandler):
                 results.append({"host": host, "action": "deploy_key", **dep})
             else:
                 # Deploy key to user, then set up root access
-                setup = ssh.setup_root_access(host, user, password)
+                setup = ssh.setup_root_access(host, user, password, root_password)
                 results.append({"host": host, "action": "root_access", **setup})
 
             # Verify connectivity
@@ -435,6 +442,8 @@ class SupArrHandler(BaseHTTPRequestHandler):
 class SupArrServer(ThreadingHTTPServer):
     """Threaded HTTP server — SSE streams won't block other requests."""
 
+    allow_reuse_address = True
+
     def __init__(self, addr, handler, project_dir):
         self.project_dir = project_dir
         self._last_config = None
@@ -466,3 +475,49 @@ def start_server(project_dir, port=None):
     thread.start()
 
     return server, port, SESSION_TOKEN
+
+
+if __name__ == "__main__":
+    import signal
+    import subprocess as _sp
+    import sys
+
+    project_dir = str(Path(__file__).resolve().parent.parent)
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else None
+
+    # Kill previous instance on the same port
+    _target_port = port or 8765
+    try:
+        result = _sp.run(
+            ["lsof", "-ti", f":{_target_port}"],
+            capture_output=True, text=True
+        )
+        if result.stdout.strip():
+            for pid in result.stdout.strip().split("\n"):
+                pid = pid.strip()
+                if pid and int(pid) != os.getpid():
+                    os.kill(int(pid), signal.SIGTERM)
+                    print(f"  Killed previous instance (PID {pid}) on port {_target_port}")
+                    time.sleep(0.5)
+    except Exception:
+        pass
+
+    server, port, token = start_server(project_dir, port)
+    url = f"http://localhost:{port}/?token={token}"
+
+    print(f"\n  SupArr Deploy running at: {url}\n")
+
+    # Open browser — prefer Windows browser on WSL, fall back to xdg-open
+    try:
+        _sp.Popen(["cmd.exe", "/c", "start", url.replace("&", "^&")],
+                  stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+    except FileNotFoundError:
+        import webbrowser
+        webbrowser.open(url)
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nShutting down.")
+        server.shutdown()

@@ -3,7 +3,13 @@
 # Runs every 30 minutes via cron. Checks all services, fires Discord alerts on issues.
 # Proactive monitoring — catches problems before they're noticed.
 
-WEBHOOK_URL="${SUPARR_DISCORD_WEBHOOK:?SUPARR_DISCORD_WEBHOOK not set}"
+# Resolve webhook: env var first, then .env file
+COMPOSE_DIR="${COMPOSE_DIR:-/opt/suparr/machine2-arr}"
+if [ -z "${SUPARR_DISCORD_WEBHOOK:-}" ] && [ -f "${COMPOSE_DIR}/.env" ]; then
+    SUPARR_DISCORD_WEBHOOK=$(grep '^DISCORD_WEBHOOK_URL=' "${COMPOSE_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d "'" | tr -d '"' || true)
+fi
+
+WEBHOOK_URL="${SUPARR_DISCORD_WEBHOOK:?SUPARR_DISCORD_WEBHOOK not set — configure in .env or pass as env var}"
 LOG="/var/log/arr-stack/health-monitor.log"
 
 RADARR_KEY=$(docker exec radarr cat /config/config.xml 2>/dev/null | grep -oP '(?<=<ApiKey>)[^<]+')

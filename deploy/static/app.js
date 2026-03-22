@@ -13,10 +13,11 @@ const STEPS = [
     { num: 3, label: 'Storage' },
     { num: 4, label: 'Plex' },
     { num: 5, label: '*arr' },
-    { num: 6, label: 'Notifications' },
-    { num: 7, label: 'Review' },
-    { num: 8, label: 'Deploy' },
-    { num: 9, label: 'Report' },
+    { num: 6, label: 'Components' },
+    { num: 7, label: 'Notifications' },
+    { num: 8, label: 'Review' },
+    { num: 9, label: 'Deploy' },
+    { num: 10, label: 'Report' },
 ];
 
 let currentStep = 1;
@@ -68,9 +69,22 @@ async function loadExistingConfig() {
             // Merge existing values over defaults
             Object.assign(cfg, resp.config);
             populateForm();
+            return;
         }
     } catch (e) {
         console.error('Failed to load existing config:', e);
+    }
+    // Fall back to localStorage if server has no saved config
+    try {
+        const saved = localStorage.getItem('suparr_cfg');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            Object.assign(cfg, parsed);
+            populateForm();
+            console.log('Restored config from localStorage');
+        }
+    } catch (e) {
+        console.error('Failed to restore config from localStorage:', e);
     }
 }
 
@@ -120,16 +134,17 @@ function showStep(n) {
 
     // Widen main for deploy/report steps
     const main = document.getElementById('main-content');
-    main.classList.toggle('wide', n >= 8);
+    main.classList.toggle('wide', n >= 9);
 
     updateStepper();
     updateConditionalFields();
-    if (n === 7) buildReview();
+    if (n === 6) buildPicker();
+    if (n === 8) buildReview();
 }
 
 function nextStep() {
     collectFormValues();
-    if (currentStep < 9) showStep(currentStep + 1);
+    if (currentStep < 10) showStep(currentStep + 1);
 }
 
 function prevStep() {
@@ -153,6 +168,8 @@ function collectFormValues() {
             cfg[key] = el.value;
         }
     });
+    // Persist to localStorage so config survives server restarts
+    try { localStorage.setItem('suparr_cfg', JSON.stringify(cfg)); } catch {}
 }
 
 function populateForm() {
@@ -170,6 +187,9 @@ function populateForm() {
     if (cfg.vpn_type) selectChoice('vpn_type', cfg.vpn_type, true);
     if (cfg.migrate_library === 'true') toggleMigration();
     updateWatchtower();
+    updateImportVisibility();
+    updateVpnFields();
+    restoreMediaCategories();
 }
 
 // ── Deploy Mode Selection ────────────────────────────────────────────────────
@@ -268,6 +288,82 @@ function toggleMigration() {
     updateConditionalFields();
 }
 
+// ── VPN Provider Fields ─────────────────────────────────────────────────────
+
+function updateVpnFields() {
+    collectFormValues();
+    const provider = cfg.vpn_provider || 'nordvpn';
+    const isCustom = provider === 'custom';
+
+    // Protocol choice: hidden for custom (always openvpn)
+    const protocolEl = document.getElementById('vpn-protocol');
+    if (protocolEl) protocolEl.classList.toggle('hidden', isCustom);
+    if (isCustom) cfg.vpn_type = 'openvpn';
+
+    // Custom config field
+    const customEl = document.getElementById('vpn-custom');
+    if (customEl) customEl.classList.toggle('hidden', !isCustom);
+
+    // Server selection: hidden for custom
+    const serverEl = document.getElementById('vpn-server');
+    if (serverEl) serverEl.classList.toggle('hidden', isCustom);
+
+    // WireGuard addresses hint: highlight for Mullvad/IVPN
+    const wgAddr = document.getElementById('vpn-wg-addresses');
+    if (wgAddr) {
+        const needsAddr = provider === 'mullvad' || provider === 'ivpn';
+        const label = wgAddr.querySelector('.form-label');
+        if (label) {
+            label.innerHTML = needsAddr
+                ? 'WireGuard Addresses <span style="color:var(--warning)">(required)</span>'
+                : 'WireGuard Addresses <span class="optional">(optional)</span>';
+        }
+    }
+
+    // Show/hide based on vpn_type
+    updateConditionalFields();
+}
+
+// ── Import List Visibility ───────────────────────────────────────────────────
+
+function updateImportVisibility() {
+    collectFormValues();
+    const sources = ['tmdb', 'trakt', 'mdblist', 'imdb'];
+    for (const src of sources) {
+        const el = document.getElementById(`import-${src}-fields`);
+        if (el) {
+            const on = cfg[`import_${src}`] === 'true';
+            el.classList.toggle('hidden', !on);
+        }
+    }
+}
+
+// ── Media Categories ─────────────────────────────────────────────────────────
+
+function collectMediaCategories() {
+    const cats = [];
+    document.querySelectorAll('#media-categories-grid input[data-cat]').forEach(cb => {
+        if (cb.checked) cats.push(cb.dataset.cat);
+    });
+    cfg.media_categories = cats.join(',');
+    const hidden = document.querySelector('[data-key="media_categories"]');
+    if (hidden) hidden.value = cfg.media_categories;
+}
+
+function restoreMediaCategories() {
+    const cats = (cfg.media_categories || '').split(',').filter(Boolean);
+    document.querySelectorAll('#media-categories-grid input[data-cat]').forEach(cb => {
+        cb.checked = cats.length === 0 || cats.includes(cb.dataset.cat);
+    });
+}
+
+// Patch collectFormValues to also sync media categories
+const _origCollectBase = collectFormValues;
+collectFormValues = function() {
+    _origCollectBase();
+    collectMediaCategories();
+};
+
 // ── SSH Connection Test ──────────────────────────────────────────────────────
 
 async function testHost(key) {
@@ -278,10 +374,28 @@ async function testHost(key) {
     const statusEl = document.getElementById(`status-${key}`);
     statusEl.innerHTML = '<span class="spinner"></span> Testing...';
 
-    const result = await api('POST', '/api/ssh/test', {
+    // Try key-based auth first
+    let result = await api('POST', '/api/ssh/test', {
         host: host,
         user: cfg.ssh_user || 'root',
     });
+
+    // If key auth fails and we have a password, deploy key and retry
+    if (!result.ok && cfg.ssh_pass) {
+        statusEl.innerHTML = '<span class="spinner"></span> Deploying SSH key...';
+        const setup = await api('POST', '/api/ssh/setup-keys', {
+            hosts: [host],
+            user: cfg.ssh_user || 'jolly',
+            password: cfg.ssh_pass,
+            root_password: cfg.root_pass || '',
+        });
+        if (setup.ok) {
+            result = { ok: true, message: `Connected to ${host}` };
+        } else {
+            const failMsg = setup.results?.find(r => !r.ok)?.message || setup.message || 'Key setup failed';
+            result = { ok: false, message: failMsg };
+        }
+    }
 
     if (result.ok) {
         statusEl.innerHTML = '<span class="status-badge success"><span class="status-dot"></span>Connected</span>';
@@ -389,6 +503,102 @@ function closeTraktModal() {
     document.getElementById('trakt-modal').classList.add('hidden');
 }
 
+// ── Component Picker ─────────────────────────────────────────────────────────
+
+let componentData = null;
+
+async function loadComponentData() {
+    if (componentData) return componentData;
+    try {
+        const resp = await api('GET', '/api/config/components');
+        componentData = resp;
+        return resp;
+    } catch (e) {
+        console.error('Failed to load components:', e);
+        return null;
+    }
+}
+
+async function buildPicker() {
+    const container = document.getElementById('component-picker');
+    if (!container) return;
+
+    const data = await loadComponentData();
+    if (!data) {
+        container.innerHTML = '<p>Failed to load component data.</p>';
+        return;
+    }
+
+    // Initialize selected_services from defaults if not set
+    if (!cfg.selected_services || typeof cfg.selected_services !== 'object') {
+        cfg.selected_services = {};
+        for (const [key, comp] of Object.entries(data.components)) {
+            if (!comp.always && comp.profile) {
+                cfg.selected_services[key] = comp.default !== undefined ? comp.default : false;
+            }
+        }
+    }
+
+    let html = '';
+    for (const tier of data.tiers) {
+        const comps = Object.entries(data.components)
+            .filter(([_, c]) => c.tier === tier.id);
+        if (!comps.length) continue;
+
+        const warnClass = tier.warn ? ' tier-warn' : '';
+        html += `<div class="picker-tier${warnClass}" data-tier="${tier.id}">`;
+        html += `<div class="picker-tier-header">`;
+        html += `<span class="picker-tier-label">${tier.label}</span>`;
+        html += `<span class="picker-tier-hint">${tier.hint}</span>`;
+        html += `</div>`;
+
+        if (tier.warn) {
+            html += `<div class="picker-warn-banner">Deselecting these is not recommended. They provide critical automation for the stack.</div>`;
+        }
+
+        html += `<div class="picker-grid">`;
+        for (const [key, comp] of comps) {
+            const checked = cfg.selected_services[key] ? 'checked' : '';
+            const autoTag = comp.auto_with ? `<span class="picker-auto">auto</span>` : '';
+            html += `<label class="picker-item" data-key="${key}">`;
+            html += `<input type="checkbox" ${checked} onchange="toggleComponent('${key}', this.checked)">`;
+            html += `<div class="picker-item-info">`;
+            html += `<span class="picker-item-label">${comp.label}${autoTag}</span>`;
+            if (comp.desc) html += `<span class="picker-item-desc">${comp.desc}</span>`;
+            html += `</div></label>`;
+        }
+        html += `</div></div>`;
+    }
+
+    container.innerHTML = html;
+    applyDependencies();
+}
+
+function toggleComponent(key, checked) {
+    if (!cfg.selected_services) cfg.selected_services = {};
+    cfg.selected_services[key] = checked;
+    applyDependencies();
+}
+
+function applyDependencies() {
+    if (!componentData || !cfg.selected_services) return;
+
+    // Whisparr enables stash + stash-tagger
+    const whisparrOn = cfg.selected_services['whisparr'];
+    for (const [key, comp] of Object.entries(componentData.components)) {
+        if (comp.auto_with === 'whisparr') {
+            cfg.selected_services[key] = !!whisparrOn;
+            const cb = document.querySelector(`.picker-item[data-key="${key}"] input`);
+            if (cb) {
+                cb.checked = !!whisparrOn;
+                cb.disabled = !!whisparrOn;
+            }
+        }
+    }
+}
+
+// selected_services is kept in cfg as an object — serializes directly to JSON
+
 // ── Review Summary ───────────────────────────────────────────────────────────
 
 function buildReview() {
@@ -405,7 +615,7 @@ function buildReview() {
     ];
 
     // Secret fields that should be masked
-    const secretKeys = new Set(['ssh_pass', 'nord_pass', 'nord_wireguard_key', 'qbit_password',
+    const secretKeys = new Set(['ssh_pass', 'root_pass', 'nord_pass', 'nord_wireguard_key', 'qbit_password',
         'trakt_client_secret', 'immich_db_password', 'plex_token']);
 
     el.innerHTML = sections.map(s => {
@@ -629,12 +839,33 @@ function finishDeploy(success, error) {
 
     document.getElementById('cancel-btn').disabled = true;
 
-    // Auto-advance to report after a short delay
-    setTimeout(() => {
-        showStep(9);
-        buildReport(success, error);
-        if (success) connectPostdeploySSE();
-    }, 1500);
+    if (success) {
+        // Clear saved config on successful deploy
+        try { localStorage.removeItem('suparr_cfg'); } catch {}
+        // Success: advance to report step after brief delay
+        setTimeout(() => {
+            showStep(10);
+            buildReport(true);
+            connectPostdeploySSE();
+        }, 1500);
+    } else {
+        // Failure: stay on terminal (step 9) so user can see the output
+        // Add error banner above terminal
+        const termPanel = document.querySelector('[data-step="9"]');
+        let banner = document.getElementById('deploy-error-banner');
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'deploy-error-banner';
+            banner.style.cssText = 'background:var(--error-bg, #2d1b1b);border:1px solid var(--error, #e74c3c);color:var(--error, #e74c3c);padding:12px 16px;border-radius:8px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;';
+            termPanel.insertBefore(banner, termPanel.firstChild);
+        }
+        const errMsg = error || 'Deploy failed';
+        banner.innerHTML = `<span><strong>Deploy failed:</strong> ${esc(errMsg)}</span>` +
+            `<button class="btn btn-sm" onclick="showStep(10);buildReport(false,'${esc(errMsg).replace(/'/g, "\\'")}')">View Report</button>`;
+
+        // Build report in background so it's ready if user navigates
+        buildReport(false, error);
+    }
 }
 
 async function cancelDeploy() {

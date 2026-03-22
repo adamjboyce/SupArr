@@ -24,21 +24,24 @@ warn() { echo -e "${YELLOW}[!]${NC} $1"; }
 info() { echo -e "${CYAN}[→]${NC} $1"; }
 
 # ── Hardware Detection ────────────────────────────────────────────────────
+# If HW_* variables are exported from detect-hardware.sh (sourced by init
+# script), use them. Otherwise fall back to local detection.
 detect_hardware() {
+    if [ -n "${HW_GPU_TYPE:-}" ]; then
+        echo "$HW_GPU_TYPE"
+        return
+    fi
+    # Fallback for standalone runs
     if [ -e /dev/dri/renderD128 ]; then
-        # Check if it's Intel
         if lspci 2>/dev/null | grep -qi 'Intel.*Graphics\|Intel.*UHD\|Intel.*Iris'; then
             echo "qsv"
             return
         fi
-        # Could be AMD — treat as CPU for now
     fi
-
     if command -v nvidia-smi &>/dev/null && nvidia-smi --query-gpu=name --format=csv,noheader &>/dev/null; then
         echo "nvenc"
         return
     fi
-
     echo "cpu"
 }
 
@@ -79,25 +82,37 @@ info "Configuring Tdarr..."
 HW_TYPE=$(detect_hardware)
 info "Hardware detected: ${BOLD}${HW_TYPE}${NC}"
 
-case "$HW_TYPE" in
-    qsv)
-        ENCODER="hevc_qsv"
-        PLUGIN="Community:Tdarr_Plugin_bsh1_Boosh_FFMPEG_QSV_HEVC"
-        FLOW_NAME="SupArr QSV HEVC Pipeline"
+# Use pre-detected values from detect-hardware.sh if available
+if [ -n "${HW_ENCODER:-}" ]; then
+    ENCODER="$HW_ENCODER"
+    PLUGIN="$HW_TDARR_PLUGIN"
+    TARGET_CODEC="${HW_CODEC:-hevc}"
+else
+    # Fallback codec selection for standalone runs
+    TARGET_CODEC="hevc"
+    case "$HW_TYPE" in
+        qsv)   ENCODER="hevc_qsv";   PLUGIN="Community:Tdarr_Plugin_bsh1_Boosh_FFMPEG_QSV_HEVC" ;;
+        nvenc) ENCODER="hevc_nvenc";  PLUGIN="Community:Tdarr_Plugin_bsh1_Boosh_FFMPEG_NVENC_HEVC" ;;
+        cpu)   ENCODER="libx265";     PLUGIN="Community:Tdarr_Plugin_bsh1_Boosh_FFMPEG_CPU_HEVC" ;;
+    esac
+fi
+
+FLOW_NAME="SupArr ${HW_TYPE^^} ${TARGET_CODEC^^} Pipeline"
+FLOW_ID="suparr_${HW_TYPE}_${TARGET_CODEC}"
+
+# Schedule from .env
+case "${TDARR_SCHEDULE:-offhours}" in
+    always)
+        SCHEDULE_JSON='[]'  # empty = always active
         ;;
-    nvenc)
-        ENCODER="hevc_nvenc"
-        PLUGIN="Community:Tdarr_Plugin_bsh1_Boosh_FFMPEG_NVENC_HEVC"
-        FLOW_NAME="SupArr NVENC HEVC Pipeline"
+    overnight)
+        # 12 AM - 8 AM every day
+        SCHEDULE_JSON='[{"day":0,"startHour":0,"endHour":8},{"day":1,"startHour":0,"endHour":8},{"day":2,"startHour":0,"endHour":8},{"day":3,"startHour":0,"endHour":8},{"day":4,"startHour":0,"endHour":8},{"day":5,"startHour":0,"endHour":8},{"day":6,"startHour":0,"endHour":8}]'
         ;;
-    cpu)
-        ENCODER="libx265"
-        PLUGIN="Community:Tdarr_Plugin_bsh1_Boosh_FFMPEG_CPU_HEVC"
-        FLOW_NAME="SupArr CPU HEVC Pipeline"
+    *)  # offhours (default): 1 AM - 5 PM
+        SCHEDULE_JSON='[{"day":0,"startHour":1,"endHour":17},{"day":1,"startHour":1,"endHour":17},{"day":2,"startHour":1,"endHour":17},{"day":3,"startHour":1,"endHour":17},{"day":4,"startHour":1,"endHour":17},{"day":5,"startHour":1,"endHour":17},{"day":6,"startHour":1,"endHour":17}]'
         ;;
 esac
-
-FLOW_ID="suparr_${HW_TYPE}_hevc"
 
 # Wait for Tdarr
 if ! wait_for_tdarr; then
@@ -153,6 +168,7 @@ libs = json.load(open('${SEED_DIR}/libraries.json'))
 for lib in libs:
     # Update flow reference to match detected hardware
     lib['flowId'] = '${FLOW_ID}'
+    lib['schedule'] = json.loads('${SCHEDULE_JSON}')
     doc = json.dumps(lib)
     subprocess.run([
         'curl', '-sf', '${TDARR_URL}/api/v2/cruddb', '-X', 'POST',
@@ -164,6 +180,28 @@ print(f'Seeded {len(libs)} libraries')
             warn "Tdarr: could not seed libraries"
     else
         warn "Tdarr: library seed not found at ${SEED_DIR}/libraries.json"
+    fi
+fi
+
+# --- Dual-GPU: create second worker if available ---
+if [ "${HW_DUAL_GPU:-false}" = "true" ] && [ -n "${HW_GPU2_TYPE:-}" ]; then
+    info "Configuring second GPU worker (${HW_GPU2_TYPE}: ${HW_GPU2_ENCODER:-})..."
+
+    # Check if a second node already exists
+    EXISTING_NODES=$(tdarr_api "NodeSettingsJSONDB" "getAll" 2>/dev/null || echo "{}")
+    NODE_COUNT=$(echo "$EXISTING_NODES" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+
+    if [ "${NODE_COUNT:-0}" -lt 2 ]; then
+        # Configure the internal node to use both GPUs
+        # Tdarr's internal node supports multiple GPU workers via the server settings
+        tdarr_api "SettingsGlobalJSONDB" "update" "settings" "{
+            \"gpuWorkers\": ${HW_TDARR_GPU_WORKERS:-2},
+            \"cpuWorkers\": ${HW_TDARR_CPU_WORKERS:-1}
+        }" > /dev/null 2>&1 && \
+            log "Tdarr: dual-GPU workers configured (${HW_TDARR_GPU_WORKERS:-2} GPU + ${HW_TDARR_CPU_WORKERS:-1} CPU)" || \
+            warn "Tdarr: could not configure dual-GPU workers"
+    else
+        log "Tdarr: multiple nodes already configured"
     fi
 fi
 
