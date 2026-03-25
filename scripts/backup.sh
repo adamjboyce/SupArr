@@ -35,7 +35,7 @@ run_backup() {
     mkdir -p "$BACKUP_DIR"
 
     log "Starting backup of ${APPDATA}..."
-    if tar -czf "$backup_file" --exclude='backups' -C "$(dirname "$APPDATA")" "$(basename "$APPDATA")" 2>/dev/null; then
+    if tar -czf "$backup_file" --exclude='backups' --exclude='downloads' --exclude='immich' --exclude='filebot' --exclude='episode-count' --one-file-system -C "$(dirname "$APPDATA")" "$(basename "$APPDATA")" 2>/dev/null; then
         local size
         size=$(du -sh "$backup_file" | cut -f1)
         log "Backup complete: ${backup_file} (${size})"

@@ -67,7 +67,7 @@ services:
       interval: 30s
       timeout: 15s
       retries: 3
-      start_period: 60s
+      start_period: 120s
 
   qbittorrent:
     image: linuxserver/qbittorrent:latest
@@ -94,7 +94,7 @@ services:
       interval: 30s
       timeout: 15s
       retries: 3
-      start_period: 90s
+      start_period: 120s
 
   sabnzbd:
     image: linuxserver/sabnzbd:latest
@@ -119,7 +119,7 @@ services:
       interval: 30s
       timeout: 15s
       retries: 3
-      start_period: 90s
+      start_period: 120s
 
   unpackerr:
     image: golift/unpackerr:latest
@@ -162,7 +162,7 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 120s
 
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
@@ -180,7 +180,7 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 120s
 
   # ── The *arr Suite ─────────────────────────────────────────────────────────
   radarr:
@@ -207,7 +207,7 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 120s
 
   sonarr:
     image: linuxserver/sonarr:latest
@@ -230,7 +230,7 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 120s
 
   lidarr:
     image: linuxserver/lidarr:latest
@@ -252,7 +252,7 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 120s
 
   bookshelf:
     image: ghcr.io/pennydreadful/bookshelf:softcover
@@ -275,7 +275,7 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 120s
 
   audiobookshelf:
     image: ghcr.io/advplyr/audiobookshelf:latest
@@ -296,7 +296,7 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 60s
 
   bazarr:
     image: linuxserver/bazarr:latest
@@ -319,7 +319,7 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 120s
 
   whisparr:
     image: ghcr.io/hotio/whisparr:v3
@@ -346,7 +346,7 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 120s
 
   # ── Quality & Automation ───────────────────────────────────────────────────
   recyclarr:
@@ -376,7 +376,7 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 60s
 
   # ── Migration Tools (profile-gated — only run during library import) ──────
   filebot:
@@ -400,7 +400,7 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 120s
 
   # ── Notifications & Monitoring ─────────────────────────────────────────────
   notifiarr:
@@ -420,7 +420,7 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 120s
 
   homepage:
     image: ghcr.io/gethomepage/homepage:latest
@@ -448,14 +448,17 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 60s
 
   # ── Download Health Monitor ────────────────────────────────────────────────
   download-monitor:
-    image: alpine:latest
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.alpine-tools
+    image: suparr/alpine-tools:latest
     container_name: download-monitor
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl jq bash coreutils > /dev/null 2>&1 && exec bash /scripts/download-monitor.sh"]
+    entrypoint: ["bash", "/scripts/download-monitor.sh"]
     environment:
       - RADARR_API_KEY=${RADARR_API_KEY:-}
       - SONARR_API_KEY=${SONARR_API_KEY:-}
@@ -483,7 +486,7 @@ services:
     environment:
       - AUTOHEAL_CONTAINER_LABEL=autoheal
       - AUTOHEAL_INTERVAL=60
-      - AUTOHEAL_START_PERIOD=120
+      - AUTOHEAL_START_PERIOD=300
       - AUTOHEAL_DEFAULT_STOP_TIMEOUT=10
       - DOCKER_SOCK=/var/run/docker.sock
       - TZ=${TZ}
@@ -548,7 +551,7 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 120s
 
   immich-ml:
     image: ghcr.io/immich-app/immich-machine-learning:release
@@ -616,15 +619,17 @@ services:
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 60s
 
   # ── Media Library Migration (optional — profile-gated) ────────────────────
   media-migration:
-    image: alpine:latest
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.migration
+    image: suparr/migration-tools:latest
     container_name: media-migration
     profiles: ["migration"]
-    entrypoint: ["/bin/sh", "-c",
-      "apk add --no-cache rsync bash coreutils jq curl > /dev/null 2>&1 && exec bash /scripts/migrate-library.sh \"$@\"", "--"]
+    entrypoint: ["bash", "/scripts/migrate-library.sh"]
     environment:
       - TZ=${TZ}
       - PUID=${PUID}
@@ -641,10 +646,13 @@ services:
 
   # ── Config Backup ─────────────────────────────────────────────────────────
   backup-privateer:
-    image: alpine:latest
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.alpine-tools
+    image: suparr/alpine-tools:latest
     container_name: backup-privateer
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl jq bash > /dev/null 2>&1 && exec bash /scripts/backup.sh"]
+    entrypoint: ["bash", "/scripts/backup.sh"]
     environment:
       - APPDATA=/data
       - BACKUP_DIR=/backups
@@ -661,10 +669,13 @@ services:
 
   # ── Maintenance Robot ────────────────────────────────────────────────────
   maintenance:
-    image: alpine:latest
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.alpine-tools
+    image: suparr/alpine-tools:latest
     container_name: maintenance
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl jq bash coreutils > /dev/null 2>&1 && exec bash /scripts/maintenance.sh"]
+    entrypoint: ["bash", "/scripts/maintenance.sh"]
     environment:
       - DISK_ALERT_THRESHOLD=85
       - STALE_DOWNLOAD_DAYS=7
@@ -680,11 +691,14 @@ services:
 
   # ── Weekly Content Digest ────────────────────────────────────────────────
   weekly-digest:
-    image: alpine:latest
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.alpine-tools
+    image: suparr/alpine-tools:latest
     container_name: weekly-digest
     profiles: ["svc-digest"]
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache curl jq bash coreutils > /dev/null 2>&1 && exec bash /scripts/weekly-digest.sh"]
+    entrypoint: ["bash", "/scripts/weekly-digest.sh"]
     environment:
       - RADARR_API_KEY=${RADARR_API_KEY:-}
       - SONARR_API_KEY=${SONARR_API_KEY:-}
@@ -695,4 +709,57 @@ services:
     volumes:
       - ../scripts/weekly-digest.sh:/scripts/weekly-digest.sh:ro
     networks: [arr-net]
+
+  # ── Discord Request Bot ────────────────────────────────────────────────────
+  requestrr:
+    image: thomst08/requestrr:latest
+    container_name: requestrr
+    profiles: ["svc-requestrr"]
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+    ports: ["4545:4545"]
+    volumes:
+      - ${APPDATA}/requestrr/config:/root/config
+    networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4545 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ── Episode Count Webhook ──────────────────────────────────────────────────
+  episode-count:
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.episode-count
+    image: suparr/episode-count:latest
+    container_name: episode-count
+    restart: unless-stopped
+    entrypoint: ["python3", "/scripts/episode-count-webhook.py"]
+    environment:
+      - SONARR_URL=http://sonarr:8989
+      - SONARR_API_KEY=${SONARR_API_KEY:-}
+      - PLEX_URL=http://${PLEX_HOST:-192.168.1.34}:32400
+      - PLEX_TOKEN=${PLEX_TOKEN:-}
+      - PLEX_TV_SECTION=2
+      - PLEX_ANIME_SECTION=3
+      - KOMETA_OUTPUT=/data/episode-counts.yml
+      - KOMETA_REMOTE=/opt/media-stack/kometa/config/episode-counts.yml
+      - SPYGLASS_HOST=jolly@${PLEX_HOST:-192.168.1.34}
+      - LISTEN_PORT=7800
+      - TZ=${TZ}
+    ports: ["7800:7800"]
+    volumes:
+      - ../scripts/episode-count-webhook.py:/scripts/episode-count-webhook.py:ro
+      - ${APPDATA}/episode-count:/data
+      - /home/jolly/.ssh:/root/.ssh:ro
+    networks: [arr-net]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7800')\" || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 

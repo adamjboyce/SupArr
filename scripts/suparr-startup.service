@@ -1,0 +1,15 @@
+[Unit]
+Description=SupArr Tiered Container Startup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/suparr/scripts/tiered-startup.sh
+RemainAfterExit=yes
+TimeoutStartSec=600
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
