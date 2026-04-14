@@ -195,12 +195,13 @@ clean_qbit() {
 
     # Process each torrent
     echo "$torrents" | jq -c '.[]' | while read -r torrent; do
-        local state name hash added_on seeds avail progress
+        local state name hash added_on seeds connected_seeds avail progress
         state=$(echo "$torrent" | jq -r '.state')
         name=$(echo "$torrent" | jq -r '.name')
         hash=$(echo "$torrent" | jq -r '.hash')
         added_on=$(echo "$torrent" | jq -r '.added_on')
         seeds=$(echo "$torrent" | jq -r '.num_complete // 0')
+        connected_seeds=$(echo "$torrent" | jq -r '.num_seeds // 0')
         avail=$(echo "$torrent" | jq -r '.availability // 0')
         progress=$(echo "$torrent" | jq -r '.progress // 0')
 
@@ -215,15 +216,12 @@ clean_qbit() {
             reason="metadata stuck ${age_h}h"
         fi
 
-        # Stalled with no seeds and no availability — truly dead
-        if [ "$state" = "stalledDL" ] && [ "$seeds" -eq 0 ] && [ "$age_h" -ge "$DEAD_THRESHOLD_HOURS" ]; then
-            # Check availability is 0 or very near 0
-            local avail_pct
-            avail_pct=$(echo "$avail" | awk '{printf "%d", $1 * 100}')
-            if [ "${avail_pct:-0}" -eq 0 ]; then
-                should_remove=true
-                reason="dead (0 seeds, 0 availability, ${age_h}h)"
-            fi
+        # Stalled with no connected peers — truly dead
+        # Uses num_seeds (actually connected) rather than num_complete (tracker-claimed)
+        # because dead XXX trackers commonly report phantom seeds that never serve data.
+        if [ "$state" = "stalledDL" ] && [ "$connected_seeds" -eq 0 ] && [ "$age_h" -ge "$DEAD_THRESHOLD_HOURS" ]; then
+            should_remove=true
+            reason="dead (0 connected seeds, ${age_h}h)"
         fi
 
         # Zombie — stalledDL with tracker-reported seeds but 0 bytes downloaded
@@ -258,10 +256,8 @@ clean_qbit() {
             fi
         fi
 
-        # Abandoned — partially downloaded but no seeders, no speed, will never finish
-        # Catches torrents the dead check misses (those with non-zero availability
-        # from leecher pieces but no complete seed in the swarm).
-        if [ "$state" = "stalledDL" ] && [ "$seeds" -eq 0 ] && [ "$age_h" -ge "$DEAD_THRESHOLD_HOURS" ] && [ "$should_remove" = "false" ]; then
+        # Abandoned — partially downloaded but no connected seeders, no speed.
+        if [ "$state" = "stalledDL" ] && [ "$connected_seeds" -eq 0 ] && [ "$age_h" -ge "$DEAD_THRESHOLD_HOURS" ] && [ "$should_remove" = "false" ]; then
             local dlspeed_chk
             dlspeed_chk=$(echo "$torrent" | jq -r '.dlspeed // 0')
             if [ "$dlspeed_chk" -eq 0 ]; then
