@@ -24,8 +24,8 @@ GENERATE_SPRITES="${GENERATE_SPRITES:-true}"
 GENERATE_PHASHES="${GENERATE_PHASHES:-true}"
 GENERATE_PREVIEWS="${GENERATE_PREVIEWS:-false}"
 
-log()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [OK] $1"; }
-warn() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [!!] $1"; }
+log()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [OK] $1" >&2; }
+warn() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [!!] $1" >&2; }
 
 # ── GraphQL helper ────────────────────────────────────────────────────────────
 gql() {
