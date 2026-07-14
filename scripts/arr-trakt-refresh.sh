@@ -18,9 +18,12 @@
 # =============================================================================
 set -uo pipefail
 
-# --- Resolve compose .env for webhook ---
+# --- Resolve webhook: alerts webhook takes priority, fall back to content webhook ---
 COMPOSE_DIR="${COMPOSE_DIR:-/opt/suparr/machine2-arr}"
-DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+DISCORD_WEBHOOK_URL="${DISCORD_ALERTS_WEBHOOK_URL:-}"
+if [ -z "$DISCORD_WEBHOOK_URL" ] && [ -f "${COMPOSE_DIR}/.env" ]; then
+    DISCORD_WEBHOOK_URL=$(grep '^DISCORD_ALERTS_WEBHOOK_URL=' "${COMPOSE_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d "'" | tr -d '"' || true)
+fi
 if [ -z "$DISCORD_WEBHOOK_URL" ] && [ -f "${COMPOSE_DIR}/.env" ]; then
     DISCORD_WEBHOOK_URL=$(grep '^DISCORD_WEBHOOK_URL=' "${COMPOSE_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d "'" | tr -d '"' || true)
 fi
@@ -153,7 +156,7 @@ print(json.dumps(config))
 
     if [ "$PUT_STATUS" = "202" ] || [ "$PUT_STATUS" = "200" ]; then
         log "[$APP_NAME] SUCCESS: Token refreshed for list $LIST_ID ($LIST_NAME)"
-        notify_discord "**Trakt Token Refreshed** ($APP_NAME/$LIST_NAME)"
+        # Routine success — logged, not sent to Discord. Only failures alert.
         return 0
     else
         log "[$APP_NAME] ERROR: PUT returned $PUT_STATUS for list $LIST_ID. Tokens obtained but not saved!"

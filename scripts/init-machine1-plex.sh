@@ -334,9 +334,15 @@ EODROP
     chmod +x /usr/local/bin/nfs-monitor.sh
     cp "$SCRIPT_DIR/nfs-monitor.service" /etc/systemd/system/nfs-monitor.service
 
-    # Inject Discord webhook if configured
-    if [ -n "${DISCORD_WEBHOOK:-}" ]; then
-        sed -i "s|^Environment=DISCORD_WEBHOOK_URL=.*|Environment=DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK|" \
+    # Inject Discord webhooks if configured
+    # NOTE: was checking $DISCORD_WEBHOOK (no _URL suffix) which never matched
+    # any .env key — this sed never fired, NFS alerts never reached Discord. Fixed 2026-07-14.
+    if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+        sed -i "s|^Environment=DISCORD_WEBHOOK_URL=.*|Environment=DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK_URL|" \
+            /etc/systemd/system/nfs-monitor.service
+    fi
+    if [ -n "${DISCORD_ALERTS_WEBHOOK_URL:-}" ]; then
+        sed -i "s|^Environment=DISCORD_ALERTS_WEBHOOK_URL=.*|Environment=DISCORD_ALERTS_WEBHOOK_URL=$DISCORD_ALERTS_WEBHOOK_URL|" \
             /etc/systemd/system/nfs-monitor.service
     fi
 

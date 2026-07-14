@@ -32,7 +32,6 @@ DEAD_THRESHOLD_HOURS="${DEAD_THRESHOLD_HOURS:-24}"
 STUCK_COMPLETE_THRESHOLD_HOURS="${STUCK_COMPLETE_THRESHOLD_HOURS:-24}"
 ZOMBIE_THRESHOLD_HOURS="${ZOMBIE_THRESHOLD_HOURS:-48}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-3600}"
-DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
 QBIT_URL="${QBIT_URL:-http://gluetun:8080}"
 QBIT_USERNAME="${QBIT_USERNAME:-}"
 QBIT_PASSWORD="${QBIT_PASSWORD:-}"
@@ -50,17 +49,6 @@ declare -a APPS=()
 [ -n "${BOOKSHELF_API_KEY:-}" ] && APPS+=("Bookshelf:bookshelf:8787:v1:${BOOKSHELF_API_KEY}")
 [ -n "${WHISPARR_API_KEY:-}" ]  && APPS+=("Whisparr:whisparr:6969:v3:${WHISPARR_API_KEY}")
 
-# Notify Discord (fire-and-forget, jq handles JSON escaping)
-notify_discord() {
-    local message="$1"
-    if [ -z "$DISCORD_WEBHOOK_URL" ]; then return; fi
-    local payload
-    payload=$(jq -n --arg c "$message" --arg u "Download Monitor" \
-        '{username: $u, content: $c}')
-    curl -sf -X POST "$DISCORD_WEBHOOK_URL" \
-        -H "Content-Type: application/json" \
-        -d "$payload" > /dev/null 2>&1 || true
-}
 
 # Calculate age in hours from ISO timestamp
 age_hours() {
@@ -140,9 +128,9 @@ check_and_clean() {
         fi
     done
 
-    # Send Discord summary for this app if anything was removed
+    # Routine cleanup — logged, not sent to Discord.
     if [ "$removed_count" -gt 0 ]; then
-        notify_discord "**${name}** — Removed ${removed_count} stalled download(s). Auto-searching for alternatives.${removed_titles}"
+        log "${name}: Removed ${removed_count} stalled download(s). Auto-searching for alternatives.${removed_titles}"
     fi
 }
 
@@ -292,7 +280,7 @@ clean_qbit() {
 
     if [ "$diff" -gt 0 ]; then
         log "qBit: removed ${diff} dead/stuck torrent(s) (was ${before_count}, now ${after_count})"
-        notify_discord "**qBittorrent** — Removed ${diff} dead torrent(s) (metadata stuck, 0-seed stalled, missing files). Active slots freed for healthy downloads."
+        # Routine cleanup — logged, not sent to Discord.
     else
         log "qBit: no dead torrents to clean"
     fi

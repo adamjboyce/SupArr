@@ -466,9 +466,15 @@ EODROP
     chmod +x /usr/local/bin/nfs-monitor.sh
     cp "$SCRIPT_DIR/nfs-monitor.service" /etc/systemd/system/nfs-monitor.service
 
-    # Inject Discord webhook if configured
-    if [ -n "${DISCORD_WEBHOOK:-}" ]; then
-        sed -i "s|^Environment=DISCORD_WEBHOOK_URL=.*|Environment=DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK|" \
+    # Inject Discord webhooks if configured
+    # NOTE: was checking $DISCORD_WEBHOOK (no _URL suffix) which never matched
+    # any .env key — this sed never fired, NFS alerts never reached Discord. Fixed 2026-07-14.
+    if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+        sed -i "s|^Environment=DISCORD_WEBHOOK_URL=.*|Environment=DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK_URL|" \
+            /etc/systemd/system/nfs-monitor.service
+    fi
+    if [ -n "${DISCORD_ALERTS_WEBHOOK_URL:-}" ]; then
+        sed -i "s|^Environment=DISCORD_ALERTS_WEBHOOK_URL=.*|Environment=DISCORD_ALERTS_WEBHOOK_URL=$DISCORD_ALERTS_WEBHOOK_URL|" \
             /etc/systemd/system/nfs-monitor.service
     fi
 
@@ -1858,48 +1864,63 @@ is_selected svc-bookshelf && enable_auto_redownload "Bookshelf" "$ARR_HOST" 8787
 is_selected svc-whisparr && enable_auto_redownload "Whisparr" "$ARR_HOST" 6969 "v3" "${WHISPARR_API_KEY:-}"
 
 # --- Discord notifications for all *arr apps ---
+# Split into two connections per app: "Discord" (content: grab/download/upgrade)
+# and "Discord Alerts" (health issues only). Falls back to the content webhook
+# if a dedicated alerts webhook isn't configured.
 if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
     info "Configuring Discord notifications..."
 
+    ALERTS_WEBHOOK="${DISCORD_ALERTS_WEBHOOK_URL:-$DISCORD_WEBHOOK_URL}"
+
     add_discord_notification() {
         local name="$1" host="$2" port="$3" api_ver="$4" api_key="$5" bot_name="$6"
+        local conn_name="$7" webhook="$8" on_grab="$9" on_download="${10}" on_upgrade="${11}" on_health="${12}"
         if [ -z "$api_key" ]; then return; fi
         local url="http://${host}:${port}/api/${api_ver}/notification"
 
-        # Check if Discord notification already exists
+        # Check if THIS named Discord connection already exists (apps can have two)
         local existing
-        existing=$(arr_api "$url" "$api_key" 2>/dev/null | jq '[.[] | select(.implementation=="Discord")] | length' 2>/dev/null || echo "0")
+        existing=$(arr_api "$url" "$api_key" 2>/dev/null | jq --arg n "$conn_name" \
+            '[.[] | select(.implementation=="Discord" and .name==$n)] | length' 2>/dev/null || echo "0")
         if [ "${existing:-0}" -gt 0 ]; then
-            log "  ${name}: Discord notification already configured"
+            log "  ${name}: ${conn_name} already configured"
             return
         fi
 
         arr_api "$url" "$api_key" POST "{
-            \"name\": \"Discord\",
+            \"name\": \"${conn_name}\",
             \"implementation\": \"Discord\",
             \"configContract\": \"DiscordSettings\",
             \"fields\": [
-                {\"name\": \"webHookUrl\", \"value\": \"${DISCORD_WEBHOOK_URL}\"},
+                {\"name\": \"webHookUrl\", \"value\": \"${webhook}\"},
                 {\"name\": \"username\", \"value\": \"${bot_name}\"}
             ],
-            \"onGrab\": true,
-            \"onDownload\": true,
-            \"onUpgrade\": true,
+            \"onGrab\": ${on_grab},
+            \"onDownload\": ${on_download},
+            \"onUpgrade\": ${on_upgrade},
             \"onRename\": false,
-            \"onHealthIssue\": true,
-            \"onHealthRestored\": true,
-            \"onApplicationUpdate\": true,
+            \"onHealthIssue\": ${on_health},
+            \"onHealthRestored\": ${on_health},
+            \"onApplicationUpdate\": false,
             \"includeHealthWarnings\": true
         }" > /dev/null 2>&1 && \
-            log "  ${name}: Discord notifications enabled" || \
-            warn "  ${name}: could not add Discord notification"
+            log "  ${name}: ${conn_name} enabled" || \
+            warn "  ${name}: could not add ${conn_name}"
     }
 
-    is_selected svc-radarr && add_discord_notification "Radarr"   "$ARR_HOST" 7878 "v3" "${RADARR_API_KEY:-}"   "Radarr"
-    is_selected svc-sonarr && add_discord_notification "Sonarr"   "$ARR_HOST" 8989 "v3" "${SONARR_API_KEY:-}"   "Sonarr"
-    is_selected svc-lidarr && add_discord_notification "Lidarr"   "$ARR_HOST" 8686 "v1" "${LIDARR_API_KEY:-}"   "Lidarr"
-    is_selected svc-bookshelf && add_discord_notification "Bookshelf" "$ARR_HOST" 8787 "v1" "${BOOKSHELF_API_KEY:-}" "Bookshelf"
-    is_selected svc-prowlarr && add_discord_notification "Prowlarr" "$ARR_HOST" 9696 "v1" "${PROWLARR_API_KEY:-}" "Prowlarr"
+    add_discord_pair() {
+        local name="$1" host="$2" port="$3" api_ver="$4" api_key="$5" bot_name="$6"
+        add_discord_notification "$name" "$host" "$port" "$api_ver" "$api_key" "$bot_name" \
+            "Discord" "$DISCORD_WEBHOOK_URL" true true true false
+        add_discord_notification "$name" "$host" "$port" "$api_ver" "$api_key" "$bot_name" \
+            "Discord Alerts" "$ALERTS_WEBHOOK" false false false true
+    }
+
+    is_selected svc-radarr && add_discord_pair "Radarr"   "$ARR_HOST" 7878 "v3" "${RADARR_API_KEY:-}"   "Radarr"
+    is_selected svc-sonarr && add_discord_pair "Sonarr"   "$ARR_HOST" 8989 "v3" "${SONARR_API_KEY:-}"   "Sonarr"
+    is_selected svc-lidarr && add_discord_pair "Lidarr"   "$ARR_HOST" 8686 "v1" "${LIDARR_API_KEY:-}"   "Lidarr"
+    is_selected svc-bookshelf && add_discord_pair "Bookshelf" "$ARR_HOST" 8787 "v1" "${BOOKSHELF_API_KEY:-}" "Bookshelf"
+    is_selected svc-prowlarr && add_discord_pair "Prowlarr" "$ARR_HOST" 9696 "v1" "${PROWLARR_API_KEY:-}" "Prowlarr"
 fi
 
 # ===========================================================================

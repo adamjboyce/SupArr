@@ -14,7 +14,7 @@
 set -euo pipefail
 
 LOGFILE="/var/log/nfs-monitor.log"
-DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+DISCORD_WEBHOOK_URL="${DISCORD_ALERTS_WEBHOOK_URL:-${DISCORD_WEBHOOK_URL:-}}"
 MACHINE_NAME="${MACHINE_NAME:-$(hostname)}"
 COOLDOWN_SECONDS=300  # Don't spam — 5 min cooldown between alerts
 

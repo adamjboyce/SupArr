@@ -22,9 +22,12 @@ MONITOR_PATH="${DISK_GUARD_PATH:-/}"
 STATE_FILE="/tmp/disk_guard_paused"
 LOG_TAG="disk_guard"
 
-# --- Resolve compose .env for webhook ---
+# --- Resolve webhook: alerts webhook takes priority, fall back to content webhook ---
 COMPOSE_DIR="${COMPOSE_DIR:-/opt/suparr/machine2-arr}"
-DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+DISCORD_WEBHOOK_URL="${DISCORD_ALERTS_WEBHOOK_URL:-}"
+if [ -z "$DISCORD_WEBHOOK_URL" ] && [ -f "${COMPOSE_DIR}/.env" ]; then
+    DISCORD_WEBHOOK_URL=$(grep '^DISCORD_ALERTS_WEBHOOK_URL=' "${COMPOSE_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d "'" | tr -d '"' || true)
+fi
 if [ -z "$DISCORD_WEBHOOK_URL" ] && [ -f "${COMPOSE_DIR}/.env" ]; then
     DISCORD_WEBHOOK_URL=$(grep '^DISCORD_WEBHOOK_URL=' "${COMPOSE_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d "'" | tr -d '"' || true)
 fi

@@ -12,7 +12,7 @@ set -euo pipefail
 DISK_ALERT_THRESHOLD="${DISK_ALERT_THRESHOLD:-85}"
 STALE_DOWNLOAD_DAYS="${STALE_DOWNLOAD_DAYS:-7}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-86400}"  # 24 hours
-DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+DISCORD_WEBHOOK_URL="${DISCORD_ALERTS_WEBHOOK_URL:-${DISCORD_WEBHOOK_URL:-}}"
 DOWNLOADS_DIR="${DOWNLOADS_DIR:-/downloads}"
 MEDIA_DIR="${MEDIA_DIR:-/media}"
 
@@ -71,7 +71,7 @@ cleanup_stale_downloads() {
 
     if [ "$count" -gt 0 ]; then
         log "Removed ${count} stale incomplete download(s)"
-        notify_discord "**Maintenance** — Removed ${count} stale incomplete download(s) older than ${STALE_DOWNLOAD_DAYS} days"
+        # Routine cleanup — logged, not sent to Discord.
     else
         log "No stale incomplete downloads found"
     fi

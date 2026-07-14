@@ -10,6 +10,7 @@ Restart=always
 RestartSec=10
 EnvironmentFile=-/etc/default/nfs-monitor
 Environment=DISCORD_WEBHOOK_URL=
+Environment=DISCORD_ALERTS_WEBHOOK_URL=
 Environment=MACHINE_NAME=%H
 Environment=DIRECT_LINK_IP=
 Environment=DIRECT_LINK_CHECK_INTERVAL=60

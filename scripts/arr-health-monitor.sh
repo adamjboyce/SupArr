@@ -3,8 +3,11 @@
 # Runs every 30 minutes via cron. Checks all services, fires Discord alerts on issues.
 # Proactive monitoring — catches problems before they're noticed.
 
-# Resolve webhook: env var first, then .env file
+# Resolve webhook: env var override first, then .env alerts webhook, then .env content webhook
 COMPOSE_DIR="${COMPOSE_DIR:-/opt/suparr/machine2-arr}"
+if [ -z "${SUPARR_DISCORD_WEBHOOK:-}" ] && [ -f "${COMPOSE_DIR}/.env" ]; then
+    SUPARR_DISCORD_WEBHOOK=$(grep '^DISCORD_ALERTS_WEBHOOK_URL=' "${COMPOSE_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d "'" | tr -d '"' || true)
+fi
 if [ -z "${SUPARR_DISCORD_WEBHOOK:-}" ] && [ -f "${COMPOSE_DIR}/.env" ]; then
     SUPARR_DISCORD_WEBHOOK=$(grep '^DISCORD_WEBHOOK_URL=' "${COMPOSE_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d "'" | tr -d '"' || true)
 fi

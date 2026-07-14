@@ -191,6 +191,8 @@ services:
       - WATCHTOWER_SCHEDULE=0 0 5 * * *
       - WATCHTOWER_NOTIFICATIONS=shoutrrr
       - WATCHTOWER_NOTIFICATION_URL=${WATCHTOWER_NOTIFICATION_URL:-}
+      # warn: suppress routine "container updated" notifications, only alert on failures
+      - WATCHTOWER_NOTIFICATIONS_LEVEL=warn
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks: [media-net]
@@ -224,6 +226,7 @@ services:
       - BACKUP_INTERVAL=604800
       - MACHINE_NAME=spyglass
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      - DISCORD_ALERTS_WEBHOOK_URL=${DISCORD_ALERTS_WEBHOOK_URL:-}
       - TZ=${TZ}
     volumes:
       - ../scripts/backup.sh:/scripts/backup.sh:ro

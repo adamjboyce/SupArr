@@ -11,7 +11,7 @@ BACKUP_DIR="${BACKUP_DIR:-/backups}"
 APPDATA="${APPDATA:-/data}"
 BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
 BACKUP_INTERVAL="${BACKUP_INTERVAL:-604800}"  # 7 days in seconds
-DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+DISCORD_WEBHOOK_URL="${DISCORD_ALERTS_WEBHOOK_URL:-${DISCORD_WEBHOOK_URL:-}}"
 MACHINE_NAME="${MACHINE_NAME:-unknown}"
 
 log()  { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [OK] $1"; }
@@ -39,7 +39,7 @@ run_backup() {
         local size
         size=$(du -sh "$backup_file" | cut -f1)
         log "Backup complete: ${backup_file} (${size})"
-        notify_discord "**${MACHINE_NAME}** — Config backup complete (${size})"
+        # Routine success — logged, not sent to Discord. Only failures alert.
     else
         warn "Backup failed!"
         notify_discord "**${MACHINE_NAME}** — Config backup FAILED"

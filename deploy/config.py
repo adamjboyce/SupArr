@@ -650,13 +650,23 @@ FIELD_SCHEMA = [
     # ── Step 6: Notifications ──────────────────────────────────────────────
     {
         "key": "discord_webhook_url",
-        "label": "Discord Webhook URL",
+        "label": "Discord Webhook URL (content)",
         "default": "",
         "section": "notifications",
         "type": "text",
         "optional": True,
         "placeholder": "https://discord.com/api/webhooks/...",
-        "help": "Server Settings → Integrations → Webhooks",
+        "help": "Grabs, downloads, upgrades, weekly digest. Server Settings → Integrations → Webhooks",
+    },
+    {
+        "key": "discord_alerts_webhook_url",
+        "label": "Discord Webhook URL (alerts)",
+        "default": "",
+        "section": "notifications",
+        "type": "text",
+        "optional": True,
+        "placeholder": "https://discord.com/api/webhooks/...",
+        "help": "Health checks, watchdog, disk/NFS issues, backup failures. Leave blank to reuse the content webhook.",
     },
     {
         "key": "watchtower_notification_url",
@@ -936,7 +946,9 @@ def generate_plex_env(config):
     kometa_plex_ip = config.get("plex_ip_for_kometa") or plex_ip
 
     # Watchtower URL
-    wt_url = derive_watchtower_url(config.get("discord_webhook_url", ""))
+    wt_url = derive_watchtower_url(
+        config.get("discord_alerts_webhook_url") or config.get("discord_webhook_url", "")
+    )
 
     plex_profiles, _ = get_selected_profiles(config)
 
@@ -966,6 +978,7 @@ def generate_plex_env(config):
         f"TRAKT_EXPIRES={_q(config.get('trakt_expires', ''))}",
         f"TRAKT_CREATED_AT={_q(config.get('trakt_created_at', ''))}",
         f"DISCORD_WEBHOOK_URL={_q(config.get('discord_webhook_url', ''))}",
+        f"DISCORD_ALERTS_WEBHOOK_URL={_q(config.get('discord_alerts_webhook_url', ''))}",
         f"WATCHTOWER_NOTIFICATION_URL={_q(wt_url)}",
     ]
     return "\n".join(lines) + "\n"
@@ -977,7 +990,9 @@ def generate_arr_env(config):
     plex_ip, arr_ip = resolve_ips(config)
 
     kometa_plex_ip = config.get("plex_ip_for_kometa") or plex_ip
-    wt_url = derive_watchtower_url(config.get("discord_webhook_url", ""))
+    wt_url = derive_watchtower_url(
+        config.get("discord_alerts_webhook_url") or config.get("discord_webhook_url", "")
+    )
 
     # Auto-generate Immich DB password if blank
     immich_pw = config.get("immich_db_password", "")
@@ -1047,6 +1062,7 @@ def generate_arr_env(config):
         f"MIGRATE_SOURCE={_q(config.get('migrate_source', ''))}",
         f"MIGRATE_NAS_EXPORT={_q(config.get('migrate_nas_export', ''))}",
         f"DISCORD_WEBHOOK_URL={_q(config.get('discord_webhook_url', ''))}",
+        f"DISCORD_ALERTS_WEBHOOK_URL={_q(config.get('discord_alerts_webhook_url', ''))}",
         f"WATCHTOWER_NOTIFICATION_URL={_q(wt_url)}",
     ]
     return "\n".join(lines) + "\n"
@@ -1121,6 +1137,7 @@ def load_existing_env(project_dir):
         "TRAKT_EXPIRES": "trakt_expires",
         "TRAKT_CREATED_AT": "trakt_created_at",
         "DISCORD_WEBHOOK_URL": "discord_webhook_url",
+        "DISCORD_ALERTS_WEBHOOK_URL": "discord_alerts_webhook_url",
     }
 
     # Pull from plex .env first

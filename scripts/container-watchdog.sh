@@ -18,10 +18,13 @@
 set -euo pipefail
 
 COMPOSE_DIR="${COMPOSE_DIR:-/opt/suparr/machine2-arr}"
-DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+DISCORD_WEBHOOK_URL="${DISCORD_ALERTS_WEBHOOK_URL:-}"
 QUIET=false
 
-# Load .env for Discord webhook if not set
+# Load .env for Discord webhook if not set: alerts webhook first, fall back to content webhook
+if [ -z "$DISCORD_WEBHOOK_URL" ] && [ -f "${COMPOSE_DIR}/.env" ]; then
+    DISCORD_WEBHOOK_URL=$(grep '^DISCORD_ALERTS_WEBHOOK_URL=' "${COMPOSE_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d "'" | tr -d '"' || true)
+fi
 if [ -z "$DISCORD_WEBHOOK_URL" ] && [ -f "${COMPOSE_DIR}/.env" ]; then
     DISCORD_WEBHOOK_URL=$(grep '^DISCORD_WEBHOOK_URL=' "${COMPOSE_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d "'" | tr -d '"' || true)
 fi
@@ -103,7 +106,7 @@ done
 
 if [ ${#recovered[@]} -gt 0 ]; then
     log "Recovered: ${recovered[*]}"
-    notify_discord "**Container Watchdog** — Recovered ${#recovered[@]} container(s): ${recovered[*]}"
+    # Auto-recovery succeeded — logged, not sent to Discord. Only unrecovered failures alert.
 fi
 
 if [ ${#still_dead[@]} -gt 0 ]; then
