@@ -10,6 +10,11 @@ if [ -z "${SUPARR_DISCORD_WEBHOOK:-}" ] && [ -f "${COMPOSE_DIR}/.env" ]; then
 fi
 
 WEBHOOK_URL="${SUPARR_DISCORD_WEBHOOK:?SUPARR_DISCORD_WEBHOOK not set — configure in .env or pass as env var}"
+
+# Resolve Spyglass Plex IP: env var first, then .env file (same PLEX_IP used by init-machine2-arr.sh)
+if [ -z "${PLEX_IP:-}" ] && [ -f "${COMPOSE_DIR}/.env" ]; then
+    PLEX_IP=$(grep '^PLEX_IP=' "${COMPOSE_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d "'" | tr -d '"' || true)
+fi
 LOG="/var/log/arr-stack/health-monitor.log"
 
 RADARR_KEY=$(docker exec radarr cat /config/config.xml 2>/dev/null | grep -oP '(?<=<ApiKey>)[^<]+')
@@ -143,8 +148,12 @@ for f in config.get('fields', []):
 
 # --- Plex check (on Spyglass) ---
 check_plex() {
+    if [ -z "${PLEX_IP:-}" ]; then
+        add_issue "**Plex (Spyglass)**: PLEX_IP not configured — check ${COMPOSE_DIR}/.env"
+        return
+    fi
     local STATUS
-    STATUS=$(curl -sf --connect-timeout 5 -o /dev/null -w '%{http_code}' "http://192.168.1.104:32400/identity" 2>/dev/null)
+    STATUS=$(curl -sf --connect-timeout 5 -o /dev/null -w '%{http_code}' "http://${PLEX_IP}:32400/identity" 2>/dev/null)
     if [ "$STATUS" != "200" ]; then
         add_issue "**Plex (Spyglass)**: HTTP $STATUS (expected 200)"
     fi
