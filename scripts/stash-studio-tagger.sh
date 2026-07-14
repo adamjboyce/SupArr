@@ -3,10 +3,11 @@
 # Stash Studio Tagger — auto-assign studios + generate previews
 # =============================================================================
 # Whisparr imports scenes to: /data/scenes/{Network}/{Studio}/{Scene}/file.ext
-# Stash scan adds files but doesn't assign metadata or generate previews.
-# This script:
-#   1. Reads the directory structure and assigns studios automatically
-#   2. Triggers preview/sprite/thumbnail generation for scenes missing them
+# Stash has no built-in recurring scan of its own — nothing discovers new
+# files on disk unless something explicitly triggers a scan. This script:
+#   1. Triggers a library scan so new Whisparr imports get discovered
+#   2. Reads the directory structure and assigns studios automatically
+#   3. Triggers preview/sprite/thumbnail generation for scenes missing them
 #
 # Runs on a configurable interval (default: 30 min). Only touches scenes
 # under /data/scenes/ for studio tagging. Generation covers all scenes.
@@ -36,6 +37,20 @@ gql() {
     fi
     curl -sf "${STASH_URL}/graphql" "${headers[@]}" \
         -d "{\"query\": $(echo "$query" | jq -Rs .)}" 2>/dev/null
+}
+
+# ── Trigger a library scan (Stash never does this on its own) ───────────────
+trigger_scan() {
+    log "Triggering library scan..."
+
+    local scan_result
+    scan_result=$(gql "mutation { metadataScan(input: {}) }")
+
+    if echo "$scan_result" | jq -e '.data.metadataScan' > /dev/null 2>&1; then
+        log "Scan task queued"
+    else
+        warn "Failed to trigger scan: $(echo "$scan_result" | jq -r '.errors[0].message // "unknown error"')"
+    fi
 }
 
 # ── Find or create a studio by name ──────────────────────────────────────────
@@ -199,10 +214,12 @@ for i in $(seq 1 30); do
 done
 
 # Run immediately, then loop
+trigger_scan
 tag_studios
 generate_missing
 while true; do
     sleep "$CHECK_INTERVAL"
+    trigger_scan
     tag_studios
     generate_missing
 done

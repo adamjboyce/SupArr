@@ -643,6 +643,32 @@ else
 fi
 
 # ===========================================================================
+header "Phase 11b: Stash Watchdog Cron"
+# ===========================================================================
+# The one-time scan above only runs at deploy time. Recurring scans are
+# triggered by stash-studio-tagger.sh every 30 min. If a scan job wedges
+# (RUNNING/STOPPING with no progress), nothing else clears it — this
+# happened silently for 3 days (2026-07-11 to 2026-07-14) before anyone
+# noticed new content had stopped appearing in Stash. This watchdog detects
+# a stuck job and restarts the Stash container to clear it.
+
+info "Installing Stash watchdog cron..."
+mkdir -p /var/log
+SUPARR_SCRIPTS="/opt/suparr/scripts"
+EXISTING_CRON=$(crontab -l 2>/dev/null || echo "")
+
+if echo "$EXISTING_CRON" | grep -qF "stash-watchdog.sh"; then
+    log "  Stash watchdog — already installed"
+else
+    EXISTING_CRON="${EXISTING_CRON}
+*/30 * * * * ${SUPARR_SCRIPTS}/stash-watchdog.sh >> /var/log/stash-watchdog.log 2>&1"
+    log "  Stash watchdog (every 30 min) — installed"
+fi
+
+echo "$EXISTING_CRON" | crontab -
+chmod +x "${SUPARR_SCRIPTS}/stash-watchdog.sh" 2>/dev/null || true
+
+# ===========================================================================
 header "Phase 12: Summary"
 # ===========================================================================
 

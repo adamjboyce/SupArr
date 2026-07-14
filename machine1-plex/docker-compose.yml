@@ -252,7 +252,12 @@ services:
       - ${APPDATA}/stash/generated:/generated
       - ${APPDATA}/stash/metadata:/metadata
       - ${APPDATA}/stash/cache:/cache
-      - ${MEDIA_ROOT}/adult:/data
+      # NOT ${MEDIA_ROOT}/adult (/mnt/media, Booty NAS) — Whisparr writes
+      # adult content to /mnt/mirror/adult (Spyglass local RAID), hardcoded
+      # in Whisparr's own compose volume. Must match or new imports are
+      # invisible to Stash. Confirmed 2026-07-14 after a compose recreate
+      # silently flipped this to the NAS path and broke discovery.
+      - /mnt/mirror/adult:/data
     networks: [media-net]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:9999 || exit 1"]
