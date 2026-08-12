@@ -56,7 +56,7 @@ All wired end-to-end (wizard → .env → init script):
 
 ## System Crons (Phase 8g)
 
-9 crons installed during deploy:
+9 crons installed during deploy, all in root's crontab on Privateer:
 - `*/15` disk_guard.sh — pause downloads when NVMe low
 - `*/30` arr-health-monitor.sh — service health checks
 - `*/30` auto-import.py — force-import stuck items
@@ -66,6 +66,12 @@ All wired end-to-end (wizard → .env → init script):
 - `15 5` container-watchdog.sh — post-Watchtower recovery
 - `0 6 */3` arr-trakt-refresh.sh — keep Trakt tokens alive
 - `0 */6` queue-cleanup.sh — purge stale items
+
+Two more crons, added outside the deploy wizard and only discovered/relocated 2026-08-12 (were sitting in jolly's personal crontab, undocumented — see `.mal/lessons-learned.md` 2026-08-12):
+- `0 4` sonarr-history-trim.sh — trims Sonarr's `DownloadHistory` table >7 days old. **Active.**
+- `0 */2` arr-maintenance.sh — qBit seed purge, DownloadHistory trim (all *arrs), Commands-table cap (docker stop/TRUNCATE/docker start when >500 rows), calls ghost-cleanup.sh. **DISABLED** (commented out in root's crontab) — the Commands-table truncate's hard container bounce was confirmed as the cause of SAB's queue appearing to periodically purge itself. Root cause of the Commands backlog itself is still open. `jolly`'s crontab also ran `container-watchdog.sh --quiet` independently of root's identical entry — redundant, left as-is for now.
+
+Any script that can `docker stop`/`TRUNCATE`/restart a production *arr container on an automated schedule needs a home in this list and a `.mal/decisions.md` entry at install time — not a personal crontab nobody else checks.
 
 ## Bazarr Setup
 
