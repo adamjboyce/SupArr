@@ -10,15 +10,18 @@
 #
 #   Layer 2 — qBittorrent direct cleanup:
 #     Catches torrents the *arr layer misses (orphans, metadata-stuck, truly
-#     dead). Removes from qBit directly.
+#     dead). If an *arr is tracking the torrent, removes it through that *arr's
+#     queue with blocklist (so it searches for a different release); otherwise
+#     removes from qBit directly.
 #     - metaDL (stuck downloading metadata) > META_THRESHOLD_HOURS
 #     - stalledDL with 0 seeds and 0 availability > DEAD_THRESHOLD_HOURS
 #     - stalledDL at >=99% progress with 0 seeds > STUCK_COMPLETE_THRESHOLD_HOURS
 #       (force recheck first, purge if still stuck next cycle)
 #     - missingFiles (orphaned torrents with deleted data)
 #
-# Removing dead torrents frees active slots for healthy ones. *arr apps detect
-# the removal and auto-search for alternative releases.
+# Removing dead torrents frees active slots for healthy ones. A tracked torrent
+# deleted straight from qBit is NOT treated as failed by the *arr — it re-grabs
+# the same release — so tracked removals go through the *arr with blocklist.
 #
 # Runs as a loop inside a container. Configure via environment variables.
 # Requires: curl, jq, bash
@@ -156,9 +159,61 @@ qbit_api() {
 
 RECHECK_TRACKING_FILE="/tmp/rechecked_hashes"
 
+# Torrent hash (lowercase) -> "<APPS index>:<queue id>" for every torrent an
+# *arr is tracking. A direct qBit delete of a tracked download leaves the *arr
+# with no failure record, so it re-grabs the same dead release on its next
+# search — indefinitely (GoT S01E08: same hash grabbed 12x Apr–Jul 2026).
+declare -A ARR_QUEUE_MAP=()
+
+build_arr_queue_map() {
+    ARR_QUEUE_MAP=()
+    local i
+    for i in "${!APPS[@]}"; do
+        local name host port api_ver api_key
+        IFS=':' read -r name host port api_ver api_key <<< "${APPS[$i]}"
+        local queue
+        queue=$(curl -sf "http://${host}:${port}/api/${api_ver}/queue?page=1&pageSize=1000" \
+            -H "X-Api-Key: ${api_key}" 2>/dev/null || echo "")
+        [ -z "$queue" ] && continue
+        local hash id
+        while read -r hash id; do
+            [ -n "$hash" ] && ARR_QUEUE_MAP["$hash"]="${i}:${id}"
+        done < <(echo "$queue" | jq -r '
+            .records // [] | .[]
+            | select(.protocol == "torrent" and .downloadId != null)
+            | "\(.downloadId | ascii_downcase) \(.id)"
+        ' 2>/dev/null || true)
+    done
+}
+
+# Remove a torrent. Tracked + blocklist=true → via the owning *arr's queue
+# (remove from client + blocklist). Untracked, or *arr call fails → qBit direct.
+remove_torrent() {
+    local hash="$1" name="$2" reason="$3" blocklist="$4"
+    local entry="${ARR_QUEUE_MAP[$hash]:-}"
+
+    if [ -n "$entry" ] && [ "$blocklist" = "true" ]; then
+        local app_name host port api_ver api_key
+        IFS=':' read -r app_name host port api_ver api_key <<< "${APPS[${entry%%:*}]}"
+        if curl -sf -X DELETE \
+            "http://${host}:${port}/api/${api_ver}/queue/${entry#*:}?removeFromClient=true&blocklist=true" \
+            -H "X-Api-Key: ${api_key}" > /dev/null 2>&1; then
+            info "qBit: removed via ${app_name} + blocklisted [${reason}]: ${name:0:70}"
+            return
+        fi
+        warn "qBit: ${app_name} queue removal failed, deleting directly [${reason}]: ${name:0:70}"
+    else
+        info "qBit: removing [${reason}]: ${name:0:70}"
+    fi
+    qbit_api "/torrents/delete" -d "hashes=${hash}&deleteFiles=true" > /dev/null 2>&1
+}
+
 clean_qbit() {
     # Login if needed
     qbit_login || { warn "qBit: login failed, skipping direct cleanup"; return; }
+
+    # Built after Layer 1 so items it already removed aren't targeted again
+    build_arr_queue_map
 
     # Fetch all torrents
     local torrents
@@ -197,6 +252,7 @@ clean_qbit() {
 
         local should_remove=false
         local reason=""
+        local blocklist=true
 
         # Metadata stuck — no info dict available
         if [ "$state" = "metaDL" ] && [ "$age_h" -ge "$META_THRESHOLD_HOURS" ]; then
@@ -256,15 +312,16 @@ clean_qbit() {
             fi
         fi
 
-        # Missing files — orphaned torrent
+        # Missing files — orphaned torrent. Data was deleted out from under it;
+        # the release itself isn't bad, so don't blocklist.
         if [ "$state" = "missingFiles" ]; then
             should_remove=true
             reason="missing files"
+            blocklist=false
         fi
 
         if [ "$should_remove" = "true" ]; then
-            info "qBit: removing [${reason}]: ${name:0:70}"
-            qbit_api "/torrents/delete" -d "hashes=${hash}&deleteFiles=true" > /dev/null 2>&1
+            remove_torrent "$hash" "$name" "$reason" "$blocklist"
         fi
     done
 
