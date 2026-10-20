@@ -51,6 +51,14 @@ services:
       - FIREWALL_OUTBOUND_SUBNETS=${LOCAL_SUBNET:-192.168.1.0/24}
       - FIREWALL_VPN_INPUT_PORTS=6881
       - DNS_SERVER=off
+      # Required alongside DNS_SERVER=off as of a recent gluetun update —
+      # DNS_UPSTREAM_RESOLVER_TYPE now defaults to "DoT", which is invalid
+      # when the built-in DNS server is disabled. Without this, gluetun
+      # crash-loops on "upstream type dot must be plain if the built-in DNS
+      # server is disabled" (found 2026-07-22). DOT=off is a different,
+      # unrelated toggle — does not fix this by itself.
+      - DNS_UPSTREAM_RESOLVER_TYPE=plain
+      - DNS_UPSTREAM_PLAIN_ADDRESSES=1.1.1.1:53,8.8.8.8:53
       - HEALTH_SUCCESS_WAIT_DURATION=10s
     ports:
       - "8080:8080"       # qBittorrent UI
@@ -609,7 +617,16 @@ services:
     networks: [arr-net]
 
   immich-db:
-    image: docker.io/tensorchord/pgvecto-rs:pg14-v0.2.0
+    # Official Immich Postgres image bundling both the old (pgvecto.rs) and
+    # new (vchord) vector extensions together. Required for the pgvecto.rs
+    # -> vchord migration: keeping both available lets immich-server's own
+    # startup logic read the old vectors.vector(512) columns and reindex
+    # them into vchord automatically (confirmed via "Reindexed face_index" /
+    # "Reindexed clip_index" log lines). Swapping straight to a vchord-only
+    # image skips that conversion and crash-loops instead (immich-app/immich
+    # issue #29983). Migrated 2026-07-23 after Watchtower auto-updated
+    # immich-server to v3.0.3, which dropped pgvecto.rs support outright.
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
     container_name: immich-db
     profiles: ["svc-immich"]
     restart: unless-stopped
@@ -757,7 +774,9 @@ services:
       - ${APPDATA}/requestrr/config:/root/config
     networks: [arr-net]
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:4545 || exit 1"]
+      # curl isn't in this image (found 2026-07-23 — container was falsely
+      # "unhealthy" while the actual service worked fine). bash is present.
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/4545' || exit 1"]
       interval: 60s
       timeout: 10s
       retries: 3
