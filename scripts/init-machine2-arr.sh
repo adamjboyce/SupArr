@@ -294,6 +294,8 @@ mkdir -p "$APPDATA"/dozzle
 mkdir -p "$APPDATA"/backups
 mkdir -p "$APPDATA"/immich/{db,ml-cache,profile,encoded-video}
 mkdir -p "$APPDATA"/syncthing/config
+# arr-postgres bind-mounts this with create_host_path: false, so it must exist first
+mkdir -p "$APPDATA"/arr-postgres/data
 mkdir -p /mnt/migrate-source
 
 # Set ownership to real user
@@ -482,6 +484,24 @@ EODROP
     systemctl enable --now nfs-monitor
     log "NFS monitor service enabled"
 fi
+
+# --- Docker Boot Recovery ---
+# RequiresMountsFor + autofs can race with DHCP at boot (network-online.target
+# can be satisfied before a lease is actually acquired) — the NFS mount fails
+# instantly ("Network is unreachable"), which is not what x-systemd.mount-timeout
+# protects against, and docker.service's start job then fails as a dependency
+# failure with no automatic retry for the rest of that boot. Confirmed on
+# Spyglass 2026-07-22: Docker sat down 4+ hours until manually restarted.
+# This timer checks 2 minutes after boot and recovers docker.service (and
+# re-triggers suparr-startup.service on this machine) if it never came up.
+info "Installing Docker boot recovery timer..."
+cp "$SCRIPT_DIR/docker-boot-recovery.sh" /opt/suparr/scripts/docker-boot-recovery.sh
+chmod +x /opt/suparr/scripts/docker-boot-recovery.sh
+cp "$SCRIPT_DIR/docker-boot-recovery.service" /etc/systemd/system/docker-boot-recovery.service
+cp "$SCRIPT_DIR/docker-boot-recovery.timer" /etc/systemd/system/docker-boot-recovery.timer
+systemctl daemon-reload
+systemctl enable --now docker-boot-recovery.timer
+log "Docker boot recovery timer enabled"
 
 # --- NFS Mount Verification ---
 if [ -n "$NAS_IP" ]; then

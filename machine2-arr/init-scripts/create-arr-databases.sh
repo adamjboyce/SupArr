@@ -15,3 +15,8 @@ EOSQL
 done
 
 echo "All *arr databases created."
+
+# Mark this cluster as the live SupArr data dir. arr-postgres's healthcheck
+# requires it, so a stale or foreign data dir mounted by mistake never goes
+# healthy (see the volumes comment in docker-compose.yml).
+touch "$PGDATA/.suparr-live-datadir"

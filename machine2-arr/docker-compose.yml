@@ -201,13 +201,26 @@ services:
       - POSTGRES_USER=${ARR_POSTGRES_USER:-arr_admin}
       - POSTGRES_PASSWORD=${ARR_POSTGRES_PASSWORD}
     volumes:
-      - ${APPDATA}/arr-postgres/data:/var/lib/postgresql/data
+      # Fails loudly instead of silently starting on the wrong data. On
+      # 2026-07-22 a reboot brought this up on a stale copy of the data dir
+      # (left behind by an uncommitted NVMe move) and every *arr lost ~4 months
+      # with no error anywhere. Two guards:
+      #   - create_host_path: false — a missing/typo'd path is a startup error,
+      #     not a freshly-initialised empty cluster.
+      #   - healthcheck requires .suparr-live-datadir (written by the initdb
+      #     hook on first init) — any other existing cluster stays unhealthy,
+      #     and every *arr waits on service_healthy, so nothing starts on it.
+      - type: bind
+        source: ${APPDATA}/arr-postgres/data
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: false
       - ./init-scripts/create-arr-databases.sh:/docker-entrypoint-initdb.d/create-arr-databases.sh:ro
     ports:
       - "127.0.0.1:5433:5432"
     networks: [arr-net]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${ARR_POSTGRES_USER:-arr_admin}"]
+      test: ["CMD-SHELL", "test -f /var/lib/postgresql/data/.suparr-live-datadir && pg_isready -U ${ARR_POSTGRES_USER:-arr_admin}"]
       interval: 10s
       timeout: 5s
       retries: 5
