@@ -3,7 +3,6 @@
 **Repo:** `git@github.com:adamjboyce/SupArr.git`
 **Working directory:** `/home/jolly/SupArr/media-stack-final/`
 **Production:** Privateer (`192.168.1.209`) at `/opt/suparr`
-**Old Privateer (Foundry):** `192.168.1.27` — still running arr stack, being migrated
 
 Two-machine Docker Compose stack with deploy wizard GUI. Spyglass (Plex + transcoding + disc ripping) and Privateer (*arr apps + downloads + automation).
 
@@ -86,3 +85,5 @@ Language profile: "English + Forced". Searches every 6 hours, upgrades subs for 
 - Recyclarr uses TRaSH Guide profiles, tier-selected (HD/4K/Both).
 - SABnzbd host whitelist pre-seeded before first start.
 - All download client additions guarded by `is_selected` per service.
+- arr-postgres data lives at `${APPDATA}/arr-postgres/data` and is guarded: `create_host_path: false` + healthcheck requires `.suparr-live-datadir` in the data dir. If arr-postgres is unhealthy while `pg_isready` passes, it's mounted on the wrong cluster — do not "fix" it by touching the marker elsewhere. See `.mal/decisions.md` 2026-10-19.
+- Never hand-edit `/opt/suparr` on a host without committing the same change here in the same session — a later sync reverts it (root cause of the 2026-07-22 arr DB rollback).
